@@ -302,8 +302,7 @@ void prepare_quantization::handle_quantize_node(program& p, quantize_node& quant
     if (optimize_quantize(p, quantize_node))
         return;
 
-    auto l = quantize_node.get_primitive()->levels;
-    if (l > 2 && l <= 256 && !quantize_node.get_scale_shift_opt() && !quantize_node.is_constant()) {
+    if (!quantize_node.get_scale_shift_opt() && !quantize_node.is_constant()) {
         prepare_scale_shift_opt(p, quantize_node);
     }
 }
