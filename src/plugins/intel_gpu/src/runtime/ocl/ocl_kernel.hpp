@@ -33,7 +33,7 @@ public:
 
         return std::make_shared<ocl_kernel>(get_handle().clone(), _kernel_id);
     }
-
+    void set_arguments(const kernel_arguments_desc& args_desc, const kernel_arguments_data& args) override;
     std::vector<uint8_t> get_binary() const override;
     std::string get_build_log() const override;
 };

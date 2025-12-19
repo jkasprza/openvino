@@ -1934,9 +1934,19 @@ void primitive_inst::set_out_event(event::ptr&& ev) {
     _impl_params->out_event = ev;
 }
 
-void primitive_inst::reset_events() {
+void primitive_inst::clear_events() {
+    _reuse_events = false;
     _impl_params->dep_events.clear();
     _impl_params->out_event = nullptr;
+}
+
+void primitive_inst::reset_events() {
+    for (auto e : _impl_params->dep_events) { 
+        e->reset();
+    }
+    if (_impl_params->out_event) {
+        _impl_params->out_event->reset();
+    }
 }
 
 void primitive_inst::set_flag(size_t flag, bool value) {
@@ -2142,6 +2152,15 @@ void primitive_inst::prepare_primitive() {
     if (get_node().is_in_shape_of_subgraph() && can_be_optimized() && _impl_params->dep_events.size() > 1 && out_of_order_queue) {
         auto grouped_ev = get_network().get_stream().group_events(_impl_params->dep_events);
         _impl_params->dep_events = {grouped_ev};
+    }
+}
+
+void primitive_inst::add_to_cmd_list(command_list* list) {
+    if (!get_flag(ExecutionFlags::SKIP) && !can_be_optimized()) {
+        if (is_dynamic())
+            _impl->update(*this, *_impl_params);
+        _impl->add_to_cmd_list(list, {}, *this);
+        _in_cmd_list = true;
     }
 }
 

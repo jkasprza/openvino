@@ -108,7 +108,8 @@ device_info init_device_info(ze_driver_handle_t driver, ze_device_handle_t devic
         supports_extension(extensions, ZEX_INTEL_QUEUE_COPY_OPERATIONS_OFFLOAD_HINT_EXP_NAME, ZEX_INTEL_QUEUE_COPY_OPERATIONS_OFFLOAD_HINT_EXP_VERSION_1_0);
     bool supports_dp_properties =
         supports_extension(extensions, ZE_INTEL_DEVICE_MODULE_DP_PROPERTIES_EXP_NAME, ZE_INTEL_DEVICE_MODULE_DP_PROPERTIES_EXP_VERSION_1_0);
-
+    bool supports_immediate_cmd_list_append =
+        supports_extension(extensions, ZE_IMMEDIATE_COMMAND_LIST_APPEND_EXP_NAME, ZE_IMMEDIATE_COMMAND_LIST_APPEND_EXP_VERSION_1_0);
     void *device_properties_next = nullptr;
     ze_device_ip_version_ext_t ip_version_properties = {ZE_STRUCTURE_TYPE_DEVICE_IP_VERSION_EXT, device_properties_next, 0};
     if (supports_ip_version) {
@@ -214,6 +215,7 @@ device_info init_device_info(ze_driver_handle_t driver, ze_device_handle_t devic
     info.supports_immad = supports_dp_properties && (dp_properties.flags & ZE_INTEL_DEVICE_MODULE_EXP_FLAG_DPAS) != 0;
 
     info.supports_usm = device_memory_access_properties.hostAllocCapabilities && device_memory_access_properties.deviceAllocCapabilities;
+    info.supports_immediate_cmd_list_append = supports_immediate_cmd_list_append;
 
     // FIXME: Could not find how to retrieve those from L0
     info.supports_work_group_collective_functions = false;

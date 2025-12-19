@@ -13,8 +13,8 @@
 #include "ze_event_factory.hpp"
 #include "ze_events.hpp"
 #include "ze_empty_event.hpp"
-
 #include "ze_event.hpp"
+#include "ze_command_list.hpp"
 #include "ze_kernel.hpp"
 #include "ze_memory.hpp"
 #include "ze_common.hpp"
@@ -46,143 +46,6 @@ inline ze_group_count_t to_group_count(const std::vector<size_t>& v) {
             return {uint32_t(v[0]), uint32_t(v[1]), uint32_t(v[2])};
         default:
             return {uint32_t(1), uint32_t(1), uint32_t(1)};
-    }
-}
-
-template<typename T>
-ze_result_t set_kernel_arg_scalar(ze_kernel_handle_t& kernel, uint32_t idx, const T& val) {
-    GPU_DEBUG_TRACE_DETAIL << "kernel: " << kernel << " set scalar " << idx << " (" << ov::element::from<T>().get_type_name() << ")" << val << "\n";
-    return zeKernelSetArgumentValue(kernel, idx, sizeof(T), &val);
-}
-
-ze_result_t set_kernel_arg_local_memory(ze_kernel_handle_t& kernel, uint32_t idx, size_t size) {
-    if (size == 0)
-        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-
-    GPU_DEBUG_TRACE_DETAIL << "kernel: " << kernel << " set arg " << idx << " local memory size: " << size << std::endl;
-    return zeKernelSetArgumentValue(kernel, idx, size, NULL);
-}
-
-ze_result_t set_kernel_arg(ze_kernel_handle_t& kernel, uint32_t idx, cldnn::memory::cptr mem) {
-    if (!mem)
-        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-
-    OPENVINO_ASSERT(memory_capabilities::is_usm_type(mem->get_allocation_type()), "Unsupported alloc type");
-    const auto& buf = std::dynamic_pointer_cast<const ze::gpu_usm>(mem)->get_buffer();
-    auto mem_type = std::dynamic_pointer_cast<const ze::gpu_usm>(mem)->get_allocation_type();
-    GPU_DEBUG_TRACE_DETAIL << "kernel: " << kernel << " set arg (" << mem_type << ") " << idx
-                            << " mem: " << buf.get() << " size: " << mem->size() << std::endl;
-
-    auto ptr = buf.get();
-    return zeKernelSetArgumentValue(kernel, idx, sizeof(ptr), &ptr);
-}
-
-void set_arguments_impl(ze_kernel_handle_t kernel,
-                         const arguments_desc& args,
-                         const kernel_arguments_data& data) {
-    using args_t = argument_desc::Types;
-    using scalar_t = scalar_desc::Types;
-
-    for (uint32_t i = 0; i < static_cast<uint32_t>(args.size()); i++) {
-        ze_result_t status = ZE_RESULT_NOT_READY;
-        switch (args[i].t) {
-            case args_t::INPUT:
-                if (args[i].index < data.inputs.size() && data.inputs[args[i].index]) {
-                    status = set_kernel_arg(kernel, i, data.inputs[args[i].index]);
-                }
-                break;
-            case args_t::INPUT_OF_FUSED_PRIMITIVE:
-                if (args[i].index < data.fused_op_inputs.size() && data.fused_op_inputs[args[i].index]) {
-                    status = set_kernel_arg(kernel, i, data.fused_op_inputs[args[i].index]);
-                }
-                break;
-            case args_t::INTERNAL_BUFFER:
-                if (args[i].index < data.intermediates.size() && data.intermediates[args[i].index]) {
-                    status = set_kernel_arg(kernel, i, data.intermediates[args[i].index]);
-                }
-                break;
-            case args_t::OUTPUT:
-                if (args[i].index < data.outputs.size() && data.outputs[args[i].index]) {
-                    status = set_kernel_arg(kernel, i, data.outputs[args[i].index]);
-                }
-                break;
-            case args_t::WEIGHTS:
-                status = set_kernel_arg(kernel, i, data.weights);
-                break;
-            case args_t::BIAS:
-                status = set_kernel_arg(kernel, i, data.bias);
-                break;
-            case args_t::WEIGHTS_ZERO_POINTS:
-                status = set_kernel_arg(kernel, i, data.weights_zero_points);
-                break;
-            case args_t::ACTIVATIONS_ZERO_POINTS:
-                status = set_kernel_arg(kernel, i, data.activations_zero_points);
-                break;
-            case args_t::COMPENSATION:
-                status = set_kernel_arg(kernel, i, data.compensation);
-                break;
-            case args_t::SCALE_TABLE:
-                status = set_kernel_arg(kernel, i, data.scale_table);
-                break;
-            case args_t::SLOPE:
-                status = set_kernel_arg(kernel, i, data.slope);
-                break;
-            case args_t::SCALAR:
-                if (data.scalars && args[i].index < data.scalars->size()) {
-                    const auto& scalar = (*data.scalars)[args[i].index];
-                    switch (scalar.t) {
-                        case scalar_t::UINT8:
-                            status = set_kernel_arg_scalar<uint8_t>(kernel, i, scalar.v.u8);
-                            break;
-                        case scalar_t::UINT16:
-                            status = set_kernel_arg_scalar<uint16_t>(kernel, i, scalar.v.u16);
-                            break;
-                        case scalar_t::UINT32:
-                            status = set_kernel_arg_scalar<uint32_t>(kernel, i, scalar.v.u32);
-                            break;
-                        case scalar_t::UINT64:
-                            status = set_kernel_arg_scalar<uint64_t>(kernel, i, scalar.v.u64);
-                            break;
-                        case scalar_t::INT8:
-                            status = set_kernel_arg_scalar<int8_t>(kernel, i, scalar.v.s8);
-                            break;
-                        case scalar_t::INT16:
-                            status = set_kernel_arg_scalar<int16_t>(kernel, i, scalar.v.s16);
-                            break;
-                        case scalar_t::INT32:
-                            status = set_kernel_arg_scalar<int32_t>(kernel, i, scalar.v.s32);
-                            break;
-                        case scalar_t::INT64:
-                            status = set_kernel_arg_scalar<int64_t>(kernel, i, scalar.v.s64);
-                            break;
-                        case scalar_t::FLOAT32:
-                            status = set_kernel_arg_scalar<float>(kernel, i, scalar.v.f32);
-                            break;
-                        case scalar_t::FLOAT64:
-                            status = set_kernel_arg_scalar<double>(kernel, i, scalar.v.f64);
-                            break;
-                        default:
-                            break;
-                    }
-                }
-                break;
-            case args_t::CELL:
-                status = set_kernel_arg(kernel, i, data.cell);
-                break;
-            case args_t::SHAPE_INFO:
-                status = set_kernel_arg(kernel, i, data.shape_info);
-                break;
-            case args_t::LOCAL_MEMORY_SIZE:
-                OPENVINO_ASSERT(args[i].index < data.local_memory_args->size() && data.local_memory_args->at(args[i].index),
-                                "The allocated local memory is necessary to set kernel arguments.");
-                status = set_kernel_arg_local_memory(kernel, i,  data.local_memory_args->at(args[i].index));
-                break;
-            default:
-                break;
-        }
-        if (status != ZE_RESULT_SUCCESS) {
-            throw std::runtime_error("Error set arg " + std::to_string(i) + ", error code: " + std::to_string(status) + "\n");
-        }
     }
 }
 
@@ -230,12 +93,11 @@ ze_stream::~ze_stream() {
 }
 
 void ze_stream::set_arguments(kernel& kernel, const kernel_arguments_desc& args_desc, const kernel_arguments_data& args) {
+    // Why do we need mutex here?
+    // This function should work from multiple threads if called for different kernel objects
     static std::mutex m;
     std::lock_guard<std::mutex> guard(m);
-
-    auto& ze_kernel = downcast<ze::ze_kernel>(kernel);
-    auto kern = ze_kernel.get_kernel_handle();
-    set_arguments_impl(kern, args_desc.arguments, args);
+    kernel.set_arguments(args_desc, args);
 }
 
 event::ptr ze_stream::enqueue_kernel(kernel& kernel,
@@ -363,6 +225,20 @@ void ze_stream::wait_for_events(const std::vector<event::ptr>& events) {
     if (needs_sync) {
         finish();
     }
+}
+
+command_list::ptr ze_stream::create_command_list() const {
+    return std::make_shared<ze_command_list>(_engine);
+}
+
+event::ptr ze_stream::enqueue_command_list(command_list& list) {
+    OPENVINO_ASSERT(_engine.get_device_info().supports_immediate_cmd_list_append, "[GPU] Command list enqueue is not supported");
+    auto ze_list = dynamic_cast<ze_command_list*>(&list);
+    uint32_t cmd_list_count = 1;
+    ze_command_list_handle_t handle = ze_list->get_handle();
+    OV_ZE_EXPECT(zeCommandListImmediateAppendCommandListsExp(
+        m_command_list, cmd_list_count, &handle, nullptr, 0, nullptr));
+    return list.get_output_event();
 }
 
 void ze_stream::sync_events(std::vector<event::ptr> const& deps, bool is_output) {

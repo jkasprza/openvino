@@ -161,7 +161,8 @@ network::network(program::ptr program, stream::ptr stream, bool is_internal, boo
     , _is_primary_stream(is_primary_stream)
     , _enable_profiling(program->get_config().get_enable_profiling())
     , _reset_arguments(true)
-    , _shape_predictor(new ShapePredictor(&program->get_engine(), program->get_config().get_shape_predictor_settings())) {
+    , _shape_predictor(new ShapePredictor(&program->get_engine(), program->get_config().get_shape_predictor_settings()))
+    , _cmd_list(stream->create_command_list()) {
     if (!_internal) {
         net_id = get_unique_net_id();
     }
@@ -174,6 +175,7 @@ network::network(program::ptr program, stream::ptr stream, bool is_internal, boo
     validate_primitives();
     preallocate_shape_info_buffers();
     add_default_output_chains();
+    build_command_list();
 }
 
 network::network(program::ptr program, bool is_internal, bool is_primary_stream)
@@ -644,6 +646,18 @@ void network::build_exec_order() {
     }
 }
 
+void network::build_command_list() {
+    for (auto& inst : _exec_order) {
+        if (_use_cmd_list && inst->can_add_to_cmd_list()) {
+            inst->add_to_cmd_list(_cmd_list.get());
+        } else {
+            GPU_DEBUG_TRACE_DETAIL << "[GPU] Primitive " << inst->id() << " excluded from command list" << std::endl;
+            _cmd_list_excluded.push_back(inst);
+        }
+    }
+    GPU_DEBUG_INFO << "[GPU] Primitives added to command list: " << (_exec_order.size() - _cmd_list_excluded.size()) << " out of " << _exec_order.size() << std::endl;
+}
+
 bool network::contains_state(const std::string& variable_id) {
     auto it = _state_initializers.find(variable_id);
     if (it != _state_initializers.end())
@@ -723,7 +737,11 @@ std::map<primitive_id, network_output> network::execute(const std::vector<event:
     // in some cases.
     auto surf_lock = get_stream().create_surfaces_lock(in_out_mem);
 
-    execute_impl(dependencies);
+    if (_use_cmd_list) {
+        execute_cmd_list_impl(dependencies);
+    } else {
+        execute_impl(dependencies);
+    }
 
     std::map<primitive_id, network_output> result;
     for (auto& inst : _outputs) {
@@ -762,7 +780,7 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     for (auto& inst : _exec_order) {
         NODE_DEBUG(*inst);
 
-        inst->reset_events();
+        inst->clear_events();
 
         if (inst->is_input()) {
             inst->add_dep_events(events);
@@ -781,6 +799,25 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     // In scenarios with a big number of very small networks it can provide performance drop.
     get_stream().flush();
 
+    // Reset all flags for the next execution
+    for (auto& inst : _exec_order) {
+        inst->reset_flags();
+    }
+}
+
+void network::execute_cmd_list_impl(const std::vector<event::ptr>& events) {
+    set_arguments();//?
+
+    _cmd_list->execute();
+    for (auto& inst : _exec_order) {
+        NODE_DEBUG(*inst);
+
+        inst->reset_events();//?
+
+        inst->prepare_primitive();//?
+        inst->execute();
+    }
+    
     // Reset all flags for the next execution
     for (auto& inst : _exec_order) {
         inst->reset_flags();

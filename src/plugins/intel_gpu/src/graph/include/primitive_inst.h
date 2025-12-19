@@ -7,6 +7,7 @@
 #include "intel_gpu/primitives/primitive.hpp"
 #include "intel_gpu/primitives/concatenation.hpp"
 #include "intel_gpu/runtime/event.hpp"
+#include "intel_gpu/runtime/command_list.hpp"
 #include "intel_gpu/runtime/memory.hpp"
 #include "intel_gpu/runtime/lru_cache.hpp"
 #include "intel_gpu/runtime/tensor_accessor.hpp"
@@ -73,6 +74,8 @@ struct primitive_impl {
     virtual void set_arguments(primitive_inst& instance) = 0;
     virtual void set_arguments(primitive_inst& instance, kernel_arguments_data& args) = 0;
     virtual event::ptr execute(const std::vector<event::ptr>& events, primitive_inst& instance) = 0;
+    virtual event::ptr add_to_cmd_list(command_list* list, const std::vector<event::ptr>& events, primitive_inst& instance) = 0;
+    virtual void update_command(command_list* list, const std::vector<event::ptr>& events, primitive_inst& instance) = 0;
     const std::string& get_kernel_name() const { return _kernel_name; }
 
     // class typed_primitive_gpu_impl override this with return false;
@@ -268,8 +271,10 @@ public:
     bool get_flag(size_t flag) const;
     void reset_flags();
 
+    /// @brief Reset output and dependency events to not signaled state
     void reset_events();
-
+    /// @brief Remove output and dependency events
+    void clear_events();
     void prepare_primitive();
     void execute();
     void init_kernels(const kernels_cache& kernels_cache) {
@@ -295,6 +300,7 @@ public:
     size_t get_fused_mem_offset() const { return _fused_mem_offset; }
     bool has_mutable_input() const { return _has_mutable_input; }
     void set_mutable_input(bool val) { _has_mutable_input = val; }
+    bool is_in_cmd_list() const { return _in_cmd_list; }
     bool is_input() const { return _is_input; }
     bool is_output() const { return _is_output; }
     bool mem_allocated() const { return _mem_allocated; }
@@ -349,6 +355,8 @@ public:
     virtual int32_t get_prealloc_iter_num() { return -1; }
     virtual void update_shape_info_tensor(const kernel_impl_params& params);
     kernel_impl_params get_fake_aligned_params_if_possible(program_node const& node, kernel_impl_params const& orig_impl_param);
+    void add_to_cmd_list(command_list* list);
+    bool can_add_to_cmd_list() const;
     bool all_dependencies_cpu_impl() const;
 
 protected:
@@ -406,6 +414,8 @@ protected:
     bool _has_mutable_input = false;
     bool _mem_allocated = false;
     bool _is_dynamic = false;
+    bool _in_cmd_list = false;
+    bool _reuse_events = false;
     primitive_type_id _type;
     primitive_id _id;
     primitive_id _org_id;
@@ -528,6 +538,26 @@ struct typed_primitive_impl : public primitive_impl {
         return execute_impl(event, reinterpret_cast<typed_primitive_inst<PType>&>(instance));
     }
 
+    event::ptr add_to_cmd_list(command_list* list, const std::vector<event::ptr>& event, primitive_inst& instance) override {
+        if (instance.type() != PType::type_id())
+            throw std::invalid_argument("Implementation type does not match primitive type");
+        if (instance.get_impl() != this)
+            throw std::invalid_argument(
+                "Trying to execute primitive implementation with mismatching primitive instance");
+
+        return add_to_cmd_list_impl(list, event, reinterpret_cast<typed_primitive_inst<PType>&>(instance));
+    }
+
+    void update_command(command_list* list, const std::vector<event::ptr>& event, primitive_inst& instance) override {
+        if (instance.type() != PType::type_id())
+            throw std::invalid_argument("Implementation type does not match primitive type");
+        if (instance.get_impl() != this)
+            throw std::invalid_argument(
+                "Trying to execute primitive implementation with mismatching primitive instance");
+
+        update_command_impl(list, event, reinterpret_cast<typed_primitive_inst<PType>&>(instance));
+    }
+
     std::vector<BufferDescriptor> get_internal_buffer_descs(const kernel_impl_params& impl_params) const override {
         return {};
     }
@@ -555,6 +585,8 @@ struct typed_primitive_impl : public primitive_impl {
     virtual void set_arguments_impl(typed_primitive_inst<PType>& /*instance*/) {}
     virtual void set_arguments_impl(typed_primitive_inst<PType>& /*instance*/, kernel_arguments_data& /*args*/) {}
     virtual event::ptr execute_impl(const std::vector<event::ptr>& event, typed_primitive_inst<PType>& instance) = 0;
+    virtual event::ptr add_to_cmd_list_impl(command_list* list, const std::vector<event::ptr>& event, typed_primitive_inst<PType>& instance) { OPENVINO_NOT_IMPLEMENTED; }
+    virtual void update_command_impl(command_list* list, const std::vector<event::ptr>& event, typed_primitive_inst<PType>& instance) { OPENVINO_NOT_IMPLEMENTED; };
 };
 
 template <class PType>

@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "kernel_args.hpp"
+
 #include <memory>
 #include <vector>
 #include <string>
@@ -19,6 +21,7 @@ public:
     virtual ~kernel() = default;
 
     virtual std::string get_id() const = 0;
+    virtual void set_arguments(const kernel_arguments_desc& args_desc, const kernel_arguments_data& args) = 0;
     virtual std::vector<uint8_t> get_binary() const = 0;
     virtual std::string get_build_log() const = 0;
 };

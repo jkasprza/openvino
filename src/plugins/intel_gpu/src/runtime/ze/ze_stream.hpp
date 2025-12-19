@@ -54,6 +54,9 @@ public:
     dnnl::stream& get_onednn_stream() override;
 #endif
 
+    command_list::ptr create_command_list() const override;
+    event::ptr enqueue_command_list(command_list& list) override;
+
 private:
     void sync_events(std::vector<event::ptr> const& deps, bool is_output = false);
 

@@ -123,6 +123,7 @@ struct device_info {
 
     bool supports_cp_offload;                   ///< [L0] Does the command queue support copy offload
     bool supports_cb_events;                    ///< [L0] Does the target runtime support counter based events
+    bool supports_immediate_cmd_list_append;    ///< [L0] Does the target runtime support appending regular command list to immediate command list
 
     std::vector<size_t> supported_simd_sizes;   ///< List of SIMD sizes supported by current device and compiler
 

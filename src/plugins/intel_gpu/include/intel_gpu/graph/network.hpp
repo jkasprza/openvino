@@ -152,6 +152,7 @@ public:
     const program::graph_optimizer_info& get_optimizer_passes_info() const;
     std::map<primitive_id, primitive_id> get_ext_id_mapping() const;
     void execute_impl(const std::vector<event::ptr>& events);
+    void execute_cmd_list_impl(const std::vector<event::ptr>& events);
 
     /// @brief Executes network and returns the list of @ref network_output.
     /// @param dependencies List of @ref event objects to be waited before network execution.
@@ -218,12 +219,14 @@ private:
     engine& _engine;
     stream::ptr _stream;
     std::unique_ptr<memory_pool> _memory_pool;
+    command_list::ptr _cmd_list;
     bool _internal;
     bool _is_primary_stream;
     bool _is_dynamic = false;
     bool _enable_profiling = false;
     bool _reset_arguments;
     bool _reuse_variable_mem = false;
+    bool _use_cmd_list = true;
 
     /* Common memory pointer for shape_info */
     memory::ptr _shape_info_ptr;
@@ -236,6 +239,7 @@ private:
     std::vector<std::shared_ptr<primitive_inst>> _outputs;
     std::list<std::shared_ptr<primitive_inst>> _exec_order;
     std::list<std::shared_ptr<primitive_inst>> _data_outputs;
+    std::list<std::shared_ptr<primitive_inst>> _cmd_list_excluded;
 
     ov::intel_gpu::VariablesMap _variables_states;
     ov::intel_gpu::VariablesInfoMap _variables_state_info;
@@ -250,6 +254,7 @@ private:
     std::shared_ptr<ShapePredictor> _shape_predictor;
 
     void build_exec_order();
+    void build_command_list();
     void allocate_primitive_instance(program_node const& node);
     void transfer_memory_to_device(std::shared_ptr<primitive_inst> instance, program_node const& node);
     void add_to_exec_order(const primitive_id& id);

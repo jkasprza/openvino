@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "command_list.hpp"
 #include "event.hpp"
 #include "kernel.hpp"
 #include "kernel_args.hpp"
@@ -78,6 +79,9 @@ public:
 #ifdef ENABLE_ONEDNN_FOR_GPU
     virtual dnnl::stream& get_onednn_stream() = 0;
 #endif
+
+    virtual command_list::ptr create_command_list() const = 0;
+    virtual event::ptr enqueue_command_list(command_list& list) = 0;
 
 protected:
     QueueTypes m_queue_type;

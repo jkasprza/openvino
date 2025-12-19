@@ -280,6 +280,52 @@ protected:
         return stream.aggregate_events(all_events, group_events);
     }
 
+    event::ptr add_to_cmd_list_impl(command_list* list, const std::vector<event::ptr>& event, typed_primitive_inst<PType>& instance) override {
+        stream& stream = instance.get_network().get_stream();
+        if (instance.can_be_optimized()) {
+            return stream.aggregate_events(events, false, instance.is_output());
+        }
+        std::vector<event::ptr> tmp_events(events);
+        std::vector<event::ptr> all_events;
+        OPENVINO_ASSERT(_kernels.size() == _kernel_data.kernels.size(), "[GPU] Mismatch between compiled kernels count and expected kernels data\n",
+                                                                        "[GPU] Compiled kernels count: ", _kernels.size(), "\n",
+                                                                        "[GPU] KernelData count: ", _kernel_data.kernels.size(), "\n",
+                                                                        "[GPU] Likely some issue with empty tensor handling happened");
+        for (size_t kd_idx = 0; kd_idx < _kernel_data.kernels.size(); ++kd_idx) {
+            if (_kernel_data.kernels[kd_idx].skip_execution)
+                continue;
+            // If any user of the prim's users is CPU implementation or network's output, set prim as a output event (event won't be nullptr)
+            bool needs_completion_event = instance.needs_completion_event();
+
+            auto& params = _kernel_data.kernels[kd_idx].params;
+            auto args = get_arguments(instance);
+            args.scalars = &params.scalars;
+
+            for (const auto& m : instance.get_intermediates_memories()) {
+                args.intermediates.push_back(m);
+            }
+
+            const auto& gws = params.workGroups.global;
+            const auto& lws = params.workGroups.local;
+
+            GPU_DEBUG_TRACE_DETAIL << "Add kernel " << kd_idx << ": gws=[" << gws[0] << ", " << gws[1] << ", " << gws[2] << "] "
+                                   << "lws=[" << lws[0] << ", " << lws[1] << ", " << lws[2] << "]"
+                                   << (needs_completion_event ? " has_completion_event=true" : "") << std::endl;
+
+            list->add(*_kernels[kd_idx], params, args);
+        }
+
+        if ((all_events.size() == 0) && (tmp_events.size() > 0))
+            return stream.aggregate_events(tmp_events);
+
+        bool group_events = (all_events.size() > 1);
+        return stream.aggregate_events(all_events, group_events);
+    }
+
+    void update_command_impl(command_list* list, const std::vector<event::ptr>& event, typed_primitive_inst<PType>& instance) override {
+        //TODO implement
+    }
+
     std::vector<std::shared_ptr<cldnn::kernel_string>> get_kernels_source() override {
         std::vector<std::shared_ptr<cldnn::kernel_string>> kernel_strings;
         for (size_t i = 0; i < _kernel_data.kernels.size(); ++i) {

@@ -40,6 +40,10 @@ public:
         return stream.aggregate_events(events);
     }
 
+    // TODO: Implement logic for command_list
+    event::ptr add_to_cmd_list(command_list* list, const std::vector<event::ptr>& event, primitive_inst& instance) override { OPENVINO_NOT_IMPLEMENTED; }
+    void update_command(command_list* list, const std::vector<event::ptr>& event, primitive_inst& instance) override { OPENVINO_NOT_IMPLEMENTED; }
+
     static std::unique_ptr<primitive_impl> create_data(const data_node& data, const kernel_impl_params&) {
         return std::make_unique<wait_for_events_impl>(data);
     }
