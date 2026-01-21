@@ -8,6 +8,7 @@
 #include "ze_module_holder.hpp"
 
 #include <memory>
+#include <mutex>
 
 namespace cldnn {
 namespace ze {
@@ -24,7 +25,9 @@ public:
     }
     ze_kernel_handle_t get_kernel_handle() { return m_kernel; }
     std::shared_ptr<ze_module_holder> get_module() { return m_module; }
+    std::mutex& get_mutex() const { return m_mutex; }
 private:
+    mutable std::mutex m_mutex;
     ze_kernel_handle_t m_kernel;
     std::shared_ptr<ze_module_holder> m_module;
 };

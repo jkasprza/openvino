@@ -8,6 +8,7 @@
 #include "kernel.hpp"
 #include "kernel_args.hpp"
 #include "execution_config.hpp"
+#include "command_list.hpp"
 
 #include <memory>
 #include <vector>
@@ -72,6 +73,8 @@ public:
 
     QueueTypes get_queue_type() const { return m_queue_type; }
     SyncMethods get_sync_method() const { return m_sync_method; }
+
+    virtual event::ptr enqueue_cmd_list(const command_list& cmd_list, bool need_output_event = false) = 0;
 
     static SyncMethods get_expected_sync_method(const ExecutionConfig& config);
 

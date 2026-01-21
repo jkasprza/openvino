@@ -25,8 +25,10 @@ public:
     }
     ze_module_handle_t get_module_handle() const { return m_module; }
     ze_module_build_log_handle_t get_build_log_handle() const { return m_build_log; }
+    std::mutex& get_mutex() const { return m_mutex; }
 
 private:
+    mutable std::mutex m_mutex;
     ze_module_handle_t m_module;
     ze_module_build_log_handle_t m_build_log;
 };
