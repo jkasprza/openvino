@@ -51,6 +51,7 @@ public:
     event::ptr create_base_event() override;
     std::unique_ptr<surfaces_lock> create_surfaces_lock(const std::vector<memory::ptr> &mem) const override;
 
+    command_list::ptr create_cmd_list() const override;
     event::ptr enqueue_cmd_list(const command_list& cmd_list, bool need_output_event) override;
 
 #ifdef ENABLE_ONEDNN_FOR_GPU

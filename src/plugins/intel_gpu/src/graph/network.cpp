@@ -174,6 +174,8 @@ network::network(program::ptr program, stream::ptr stream, bool is_internal, boo
     validate_primitives();
     preallocate_shape_info_buffers();
     add_default_output_chains();
+    // TODO: add option to disable slices
+    _slices = NetworkSlice::build_slices(_engine, _stream, _exec_order);
 }
 
 network::network(program::ptr program, bool is_internal, bool is_primary_stream)
@@ -758,22 +760,32 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     const bool needs_flushing = _is_dynamic;
     const size_t flush_frequency = needs_flushing ? 16 : 0;
     size_t executed_prims = 0;
+    size_t next_slice_i = 0;
+    auto it = _exec_order.begin();
+    while(it != _exec_order.end()) {
+        auto& inst = *it;
+        if (next_slice_i < _slices.size() && it == _slices[next_slice_i].get_start()) {
+            _slices[next_slice_i].run(events);
+            it = _slices[next_slice_i].get_end();
+            next_slice_i++;
+        } else {
+            NODE_DEBUG(*inst);
 
-    for (auto& inst : _exec_order) {
-        NODE_DEBUG(*inst);
+            inst->reset_events();
 
-        inst->reset_events();
+            if (inst->is_input()) {
+                inst->add_dep_events(events);
+            }
 
-        if (inst->is_input()) {
-            inst->add_dep_events(events);
+            inst->prepare_primitive();
+            inst->execute();
+
+            executed_prims++;
+            if (needs_flushing && executed_prims % flush_frequency == 0)
+                get_stream().flush();
+
+            std::advance(it, 1);
         }
-
-        inst->prepare_primitive();
-        inst->execute();
-
-        executed_prims++;
-        if (needs_flushing && executed_prims % flush_frequency == 0)
-            get_stream().flush();
     }
 
     // Using output of previous network as input to another one may cause hazard (in OOOQ mode) if user would not

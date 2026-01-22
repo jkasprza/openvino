@@ -234,6 +234,10 @@ dnnl::stream& ze_stream::get_onednn_stream() {
 }
 #endif
 
+command_list::ptr ze_stream::create_cmd_list() const {
+    return std::make_shared<ze_command_list>(_engine, m_ev_factory, m_queue_type);
+}
+
 event::ptr ze_stream::enqueue_cmd_list(const command_list& cmd_list, bool need_output_event = false) {
     OPENVINO_ASSERT(_engine.get_device_info().supports_immediate_cmd_list_append, "[GPU] Command list enqueue is not supported");
     auto ze_list = dynamic_cast<const ze_command_list*>(&cmd_list);

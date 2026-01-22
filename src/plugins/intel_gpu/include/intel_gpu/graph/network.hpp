@@ -8,6 +8,7 @@
 
 #include "intel_gpu/graph/topology.hpp"
 #include "intel_gpu/graph/program.hpp"
+#include "intel_gpu/graph/network_slice.hpp"
 #include "intel_gpu/graph/serialization/binary_buffer.hpp"
 #include "intel_gpu/runtime/memory.hpp"
 #include "intel_gpu/runtime/engine.hpp"
@@ -218,6 +219,7 @@ private:
     engine& _engine;
     stream::ptr _stream;
     std::unique_ptr<memory_pool> _memory_pool;
+    std::vector<NetworkSlice> _slices;
     bool _internal;
     bool _is_primary_stream;
     bool _is_dynamic = false;

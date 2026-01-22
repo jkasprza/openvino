@@ -13,7 +13,7 @@
 namespace cldnn {
 namespace ze {
 
-class ze_command_list : command_list {
+class ze_command_list : public command_list {
 public:
 
     ze_command_list(const ze_engine& engine, std::shared_ptr<ze_base_event_factory> ev_factory, QueueTypes queue_type);

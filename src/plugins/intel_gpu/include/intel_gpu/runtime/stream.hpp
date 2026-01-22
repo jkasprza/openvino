@@ -74,6 +74,7 @@ public:
     QueueTypes get_queue_type() const { return m_queue_type; }
     SyncMethods get_sync_method() const { return m_sync_method; }
 
+    virtual command_list::ptr create_cmd_list() const = 0;
     virtual event::ptr enqueue_cmd_list(const command_list& cmd_list, bool need_output_event = false) = 0;
 
     static SyncMethods get_expected_sync_method(const ExecutionConfig& config);
