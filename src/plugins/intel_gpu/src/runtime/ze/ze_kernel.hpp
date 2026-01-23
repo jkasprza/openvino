@@ -19,7 +19,7 @@ public:
     /// @brief Create L0 kernel object for every entry point in the module.
     /// Ignore special "Intel_Symbol_Table_Void_Program" entry point.
     /// @param module Input module to create kernels from
-    /// @param out Vector for appending resulting kernels 
+    /// @param out Vector for appending resulting kernels
     static void create_kernels_from_module(std::shared_ptr<ze_module_holder> module, std::vector<kernel::ptr> &out);
 
     ze_kernel(std::shared_ptr<ze_kernel_holder> kernel, const std::string& kernel_id);

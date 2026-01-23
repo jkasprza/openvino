@@ -20,7 +20,7 @@ class command_list {
 public:
     using ptr = std::shared_ptr<command_list>;
 
-    command_list() 
+    command_list()
         : m_is_closed(false) {}
     virtual ~command_list() = default;
 

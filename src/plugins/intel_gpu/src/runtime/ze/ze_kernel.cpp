@@ -244,7 +244,7 @@ void ze_kernel::launch(ze_command_list_handle_t cmd_list_handle, const kernel_ar
         }
     }
     auto ze_out_event = std::dynamic_pointer_cast<ze_base_event>(out_event);
-    
+
     auto kernel_handle = get_kernel_handle();
     auto global = to_group_count(args_desc.workGroups.global);
     auto local = to_group_count(args_desc.workGroups.local);

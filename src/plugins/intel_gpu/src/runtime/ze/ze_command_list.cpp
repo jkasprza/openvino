@@ -23,7 +23,7 @@ ze_command_list::ze_command_list(const ze_engine& engine, std::shared_ptr<ze_bas
     command_list_desc.pNext = nullptr;
     command_list_desc.commandQueueGroupOrdinal = info.compute_queue_group_ordinal;
     command_list_desc.flags = (queue_type == QueueTypes::in_order) ? ZE_COMMAND_LIST_FLAG_IN_ORDER : 0;
-    
+
     // TODO: Add support for mutable command lists
     /*ze_mutable_command_list_exp_desc_t mcl_desc;
     mcl_desc.stype = ZE_STRUCTURE_TYPE_MUTABLE_COMMAND_LIST_EXP_DESC;
