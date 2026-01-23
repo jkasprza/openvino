@@ -9,20 +9,21 @@
 #include "ze/ze_engine.hpp"
 #include "ze/ze_kernel.hpp"
 #include "ze/ze_memory.hpp"
+#include "ze_empty_event.hpp"
 #include "ze_api.h"
 
 namespace cldnn {
 namespace ze {
 
-ze_command_list::ze_command_list(const ze_engine& engine, std::shared_ptr<ze_base_event_factory> ev_factory, QueueTypes queue_type)
-    : m_engine(engine)
-    , m_event_factory(ev_factory) {
-    const auto &info = m_engine.get_device_info();
+ze_command_list::ze_command_list(ze_stream &stream)
+    : m_stream(stream) {
+    const auto& engine = stream.get_engine();
+    const auto &info = engine.get_device_info();
     ze_command_list_desc_t command_list_desc;
     command_list_desc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
     command_list_desc.pNext = nullptr;
     command_list_desc.commandQueueGroupOrdinal = info.compute_queue_group_ordinal;
-    command_list_desc.flags = (queue_type == QueueTypes::in_order) ? ZE_COMMAND_LIST_FLAG_IN_ORDER : 0;
+    command_list_desc.flags = (m_stream.get_queue_type() == QueueTypes::in_order) ? ZE_COMMAND_LIST_FLAG_IN_ORDER : 0;
 
     // TODO: Add support for mutable command lists
     /*ze_mutable_command_list_exp_desc_t mcl_desc;
@@ -33,14 +34,23 @@ ze_command_list::ze_command_list(const ze_engine& engine, std::shared_ptr<ze_bas
         command_list_desc.pNext = &mcl_desc;
     }*/
 
-    OV_ZE_EXPECT(zeCommandListCreate(m_engine.get_context(), m_engine.get_device(), &command_list_desc, &m_command_list));
+    OV_ZE_EXPECT(zeCommandListCreate(engine.get_context(), engine.get_device(), &command_list_desc, &m_command_list));
     OV_ZE_EXPECT(zeCommandListAppendBarrier(m_command_list, nullptr, 0, nullptr));
 }
 
-void ze_command_list::append_kernel_launch(kernel& k, const kernel_arguments_desc& args_desc, const kernel_arguments_data& args, const std::vector<event::ptr>& events = {}, event::ptr out_event = nullptr) {
+event::ptr ze_command_list::append_kernel_launch(kernel& k,
+        const kernel_arguments_desc& args_desc,
+        const kernel_arguments_data& args,
+        const std::vector<event::ptr>& events,
+        bool needs_out_event) {
     auto& ze_kern = downcast<ze_kernel>(k);
-    // TODO: Rethink events -> should we just pass them here or take into account queue_type
+    auto sync_method = m_stream.get_sync_method();
+    bool set_out_event = needs_out_event || sync_method == SyncMethods::events;
+    // event queue timestamp will be incorrect
+    // even if we do everything correct here in case cmd list is rebuilt they will be incorrect
+    auto out_event = set_out_event ? m_stream.create_base_event() : std::make_shared<ze_empty_event>(0);
     ze_kern.launch(m_command_list, args_desc, args, events, out_event);
+    return out_event;
 }
 
 void ze_command_list::close_impl() {

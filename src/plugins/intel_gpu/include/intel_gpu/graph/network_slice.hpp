@@ -26,7 +26,9 @@ struct NetworkSlice {
         : m_engine(engine)
         , m_stream(stream)
         , m_start(start)
-        , m_end(end) {
+        , m_end(end)
+        , m_cmd_list(nullptr)
+        , m_requires_update(false) {
             // It is assumed that all primitives in the range support command list submission
             OPENVINO_ASSERT(std::distance(m_start, m_end) > 0, "[GPU] NetworkSlice must contain at least 1 primitive");
         }
@@ -46,11 +48,12 @@ private:
     stream::ptr m_stream;
     const PrimitiveIterator m_start;
     const PrimitiveIterator m_end;
-    std::shared_ptr<command_list> m_list = nullptr;
+    std::shared_ptr<command_list> m_cmd_list;
+    bool m_requires_update;
 
-    void prepare_primitives();
-    bool requires_update();
+    /// @brief Update existing command list. Might mutate current command list or replace it with new one
     void update_cmd_list();
+    /// @brief Build command list from scratch
     void build_cmd_list();
 };
 

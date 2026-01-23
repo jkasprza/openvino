@@ -268,6 +268,44 @@ struct PrimitiveImplOCL : public cldnn::primitive_impl {
         return stream.enqueue_kernel(*stage.kernel, params, {}, events, needs_completion_event);
     }
 
+    cldnn::event::ptr add_stage_to_cmd_list(const std::vector<cldnn::event::ptr>& events, cldnn::primitive_inst& instance, Stage& stage) const {
+        auto cmd_list = instance.get_cmd_list();
+        bool needs_completion_event = instance.needs_completion_event();
+
+        auto& kd = stage.kd;
+        auto& params = kd.params;
+
+        if (kd.need_dispatch_data_update) {
+            kd.update_dispatch_data_func(*instance.get_impl_params(), kd, m_rt_params.get());
+            kd.need_dispatch_data_update = false;
+        }
+
+        if (kd.need_args_update) {
+            auto args = get_arguments(instance);
+            args.scalars = &params.scalars;
+            args.local_memory_args = &params.local_memory_args;
+
+            GPU_DEBUG_TRACE_DETAIL << "\nAppend stage = " << stage.kernel->get_id() << " to command list\n";
+            GPU_DEBUG_TRACE_DETAIL << "Configured kernel arguments:" << params.arguments.size() << '\n';
+            for (size_t i = 0; i < params.arguments.size(); i++) {
+                GPU_DEBUG_TRACE_DETAIL << "\t" << i << ": type = " << static_cast<size_t>(params.arguments[i].t) << ", index = " << params.arguments[i].index
+                                       << '\n';
+            }
+            GPU_DEBUG_TRACE_DETAIL << "Memory buffers:" << "shape_info=" << args.shape_info << " " << "inputs=" << args.inputs.size() << " "
+                                   << "outputs=" << args.outputs.size() << " " << "intermediates=" << args.intermediates.size() << " "
+                                   << "weights=" << args.weights << " " << "scalars=" << (args.scalars ? args.scalars->size() : 0) << "\n";
+            stage.kernel->set_arguments(params, args);
+            kd.need_args_update = false;
+        }
+
+        const auto& gws = params.workGroups.global;
+        const auto& lws = params.workGroups.local;
+
+        GPU_DEBUG_TRACE_DETAIL << "Enqueue stage " << stage.kernel->get_id() << " : gws=[" << gws[0] << ", " << gws[1] << ", " << gws[2] << "] " << "lws=["
+                               << lws[0] << ", " << lws[1] << ", " << lws[2] << "]" << (needs_completion_event ? " has_completion_event=true" : "") << '\n';
+        return cmd_list->append_kernel_launch(*stage.kernel, params, {}, events, needs_completion_event);
+    }
+
     virtual std::vector<size_t> get_stages_execution_order(const cldnn::primitive_inst& instance) const {
         return _order;
     }
@@ -291,6 +329,36 @@ struct PrimitiveImplOCL : public cldnn::primitive_impl {
         // Default impl just runs each stage in registration order
         for (const auto& stage_id : exec_stages) {
             tmp_events = {execute_stage(tmp_events, instance, *_stages[stage_id])};
+            all_events.push_back(tmp_events[0]);
+        }
+
+        return stream.aggregate_events(all_events, true, instance.is_output());
+    }
+
+    bool supports_cmd_list() const override {
+        return true;
+    }
+    cldnn::event::ptr add_to_cmd_list(const std::vector<cldnn::event::ptr>& events, cldnn::primitive_inst& instance) override {
+        cldnn::stream& stream = instance.get_network().get_stream();
+        if (instance.can_be_optimized()) {
+            // TODO: queue_stamp based aggregate_events may cause issues with cmd_list execution
+            // need to investigate
+            return stream.aggregate_events(events, events.size() > 1, instance.is_output());
+        }
+
+        update_rt_params(instance);
+
+        const auto& exec_stages = get_stages_execution_order(instance);
+
+        if (exec_stages.size() == 1) {
+            return add_stage_to_cmd_list(events, instance, *_stages[exec_stages[0]]);
+        }
+
+        std::vector<cldnn::event::ptr> tmp_events(events);
+        std::vector<cldnn::event::ptr> all_events;
+        // Default impl just runs each stage in registration order
+        for (const auto& stage_id : exec_stages) {
+            tmp_events = {add_stage_to_cmd_list(tmp_events, instance, *_stages[stage_id])};
             all_events.push_back(tmp_events[0]);
         }
 

@@ -15,8 +15,8 @@ std::vector<NetworkSlice> NetworkSlice::build_slices(engine& engine, stream::ptr
     size_t slice_len = 0;
     size_t combined_slices_len = 0;
     while (end != exec_order.end()) {
-        //auto &curr_node = end->get()->get_node();
-        bool supports_cmd_list = false;// TODO:
+        auto inst = end->get();
+        bool supports_cmd_list = inst->supports_cmd_list();
         bool finish_slice = !supports_cmd_list || (slice_len >= max_slice_size);
         if (finish_slice) {
             if (slice_len > 0) {
@@ -43,40 +43,47 @@ std::vector<NetworkSlice> NetworkSlice::build_slices(engine& engine, stream::ptr
     return slices;
 }
 event::ptr NetworkSlice::run(const std::vector<event::ptr>& dep_events) {
-    prepare_primitives();
-    if (requires_update()) {
+    if (!m_cmd_list) {
+        build_cmd_list();
+    } else {
         update_cmd_list();
     }
-    auto ev = m_stream->enqueue_cmd_list(*m_list, true);
+    auto ev = m_stream->enqueue_cmd_list(*m_cmd_list, true);
     return ev;
 }
 
-void NetworkSlice::prepare_primitives() {
-    auto iter = m_start;
-    while(iter != m_end) {
-        iter->get()->prepare_primitive();
-        std::advance(iter, 1);
-    }
-}
-
 void NetworkSlice::build_cmd_list() {
-    m_list = m_stream->create_cmd_list();
+    m_cmd_list = m_stream->create_cmd_list();
     auto iter = m_start;
     while(iter != m_end) {
-        //TODO:
-        //iter->get()->add_to_command_list(m_list.get());
+        auto inst = iter->get();
+        inst->reset_flags();
+        inst->reset_events();
+        inst->prepare_primitive();
+        inst->add_to_cmd_list(m_cmd_list);
         std::advance(iter, 1);
     }
-    m_list->close();
-}
-
-
-bool NetworkSlice::requires_update() {
-    return true;
+    m_cmd_list->close();
 }
 
 void NetworkSlice::update_cmd_list() {
-    build_cmd_list();
+    auto iter = m_start;
+    while(iter != m_end) {
+        auto inst = iter->get();
+        inst->reset_flags();
+        inst->reset_events();
+        inst->prepare_primitive();
+        bool needs_update = true; //TODO:
+        bool can_mutate = false; //TODO:
+        if (needs_update) {
+            if (!can_mutate) {
+                build_cmd_list();
+                break;
+            }
+            //TODO: add mutation
+        }
+        std::advance(iter, 1);
+    }
 }
 
 }  // namespace cldnn

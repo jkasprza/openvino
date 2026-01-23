@@ -51,12 +51,14 @@ public:
     event::ptr create_base_event() override;
     std::unique_ptr<surfaces_lock> create_surfaces_lock(const std::vector<memory::ptr> &mem) const override;
 
-    command_list::ptr create_cmd_list() const override;
+    command_list::ptr create_cmd_list() override;
     event::ptr enqueue_cmd_list(const command_list& cmd_list, bool need_output_event) override;
 
 #ifdef ENABLE_ONEDNN_FOR_GPU
     dnnl::stream& get_onednn_stream() override;
 #endif
+
+    const ze_engine& get_engine() const { return _engine; }
 
 private:
     void sync_events(std::vector<event::ptr> const& deps, bool is_output = false);

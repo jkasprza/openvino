@@ -2205,6 +2205,24 @@ void primitive_inst::execute() {
     }
 }
 
+bool primitive_inst::supports_cmd_list() const {
+    // TODO: We might be able to run unfused subgraph but need more info
+    return (_unfused_subgraph == nullptr) && _impl->supports_cmd_list();
+}
+
+command_list::ptr primitive_inst::get_cmd_list() const {
+    return _cmd_list;
+}
+
+void primitive_inst::add_to_cmd_list(command_list::ptr cmd_list) {
+    _cmd_list = cmd_list;
+    if (get_flag(ExecutionFlags::SKIP)) {
+        set_out_event(get_network().get_stream().aggregate_events(_impl_params->dep_events));
+        return;
+    }
+    set_out_event(_impl->add_to_cmd_list(_impl_params->dep_events, *this));
+}
+
 void primitive_inst::set_arguments() {
     OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, openvino::itt::handle("set_arguments: " + id()));
     GPU_DEBUG_PROFILED_STAGE(instrumentation::pipeline_stage::set_arguments);

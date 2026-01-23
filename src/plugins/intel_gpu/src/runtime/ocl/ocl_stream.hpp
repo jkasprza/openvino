@@ -49,7 +49,7 @@ public:
     event::ptr create_base_event() override;
     std::unique_ptr<surfaces_lock> create_surfaces_lock(const std::vector<memory::ptr> &mem) const override;
 
-    command_list::ptr create_cmd_list() const override { OPENVINO_NOT_IMPLEMENTED; }
+    command_list::ptr create_cmd_list() override { OPENVINO_NOT_IMPLEMENTED; }
     event::ptr enqueue_cmd_list(const command_list& cmd_list, bool need_output_event = false) override { OPENVINO_NOT_IMPLEMENTED; }
 
     const cl::UsmHelper& get_usm_helper() const { return _engine.get_usm_helper(); }

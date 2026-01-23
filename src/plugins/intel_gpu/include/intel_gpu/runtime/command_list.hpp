@@ -44,8 +44,12 @@ public:
     /// @param args_desc Kernel argument descriptors
     /// @param args Kernel argument data
     /// @param event Optional dependencies
-    /// @param out_event Optional output event to be signaled when kernel finishes
-    virtual void append_kernel_launch(kernel& k, const kernel_arguments_desc& args_desc, const kernel_arguments_data& args, const std::vector<event::ptr>& events = {}, event::ptr out_event = nullptr) = 0;
+    /// @param needs_out_event True if output event needs to be set
+    virtual event::ptr append_kernel_launch(kernel& k,
+        const kernel_arguments_desc& args_desc,
+        const kernel_arguments_data& args,
+        const std::vector<event::ptr>& events = {},
+        bool needs_out_event = false) = 0;
 protected:
     virtual void close_impl() = 0;
     virtual void reset_impl() = 0;

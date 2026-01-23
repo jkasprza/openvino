@@ -12,6 +12,7 @@
 #include "intel_gpu/runtime/tensor_accessor.hpp"
 #include "intel_gpu/graph/network.hpp"
 #include "intel_gpu/runtime/utils.hpp"
+#include "intel_gpu/runtime/command_list.hpp"
 #include "openvino/core/partial_shape.hpp"
 #include "program_node.h"
 #include "primitive_type.h"
@@ -73,6 +74,10 @@ struct primitive_impl {
     virtual void set_arguments(primitive_inst& instance) = 0;
     virtual void set_arguments(primitive_inst& instance, kernel_arguments_data& args) = 0;
     virtual event::ptr execute(const std::vector<event::ptr>& events, primitive_inst& instance) = 0;
+    /// @brief Check if primitive can be added to command list
+    virtual bool supports_cmd_list() const { return false; }
+    /// @brief Add primitive to command list
+    virtual event::ptr add_to_cmd_list(const std::vector<event::ptr>& events, primitive_inst& instance) { OPENVINO_NOT_IMPLEMENTED; }
     const std::string& get_kernel_name() const { return _kernel_name; }
 
     // class typed_primitive_gpu_impl override this with return false;
@@ -372,12 +377,20 @@ public:
     kernel_impl_params get_fake_aligned_params_if_possible(program_node const& node, kernel_impl_params const& orig_impl_param);
     bool all_dependencies_cpu_impl() const;
 
+    /// @brief Check if primitive can be added to command list
+    bool supports_cmd_list() const;
+    /// @brief Add primitive to command list
+    void add_to_cmd_list(command_list::ptr cmd_list);
+    /// @brief Retrieve currently assigned command list
+    command_list::ptr get_cmd_list() const;
+
 protected:
     primitive_inst(network& network, program_node const& node, bool allocate_memory);
 
     network& _network;
     program_node const* _node;
     layout _node_output_layout;
+    command_list::ptr _cmd_list;
 
     bool _update_shape_done_by_other = false;
     bool _allocation_done_by_other = false;
@@ -541,13 +554,13 @@ struct typed_primitive_impl : public primitive_impl {
     using primitive_impl::primitive_impl;
 
     event::ptr execute(const std::vector<event::ptr>& event, primitive_inst& instance) override {
-        if (instance.type() != PType::type_id())
-            throw std::invalid_argument("Implementation type does not match primitive type");
-        if (instance.get_impl() != this)
-            throw std::invalid_argument(
-                "Trying to execute primitive implementation with mismatching primitive instance");
-
+        expect_correct_instance(instance);
         return execute_impl(event, reinterpret_cast<typed_primitive_inst<PType>&>(instance));
+    }
+
+    event::ptr add_to_cmd_list(const std::vector<event::ptr>& events, primitive_inst& instance) {
+        expect_correct_instance(instance);
+        return add_to_cmd_list_impl(events, reinterpret_cast<typed_primitive_inst<PType>&>(instance));
     }
 
     std::vector<BufferDescriptor> get_internal_buffer_descs(const kernel_impl_params& impl_params) const override {
@@ -555,28 +568,27 @@ struct typed_primitive_impl : public primitive_impl {
     }
 
     void set_arguments(primitive_inst& instance) override {
-        if (instance.type() != PType::type_id())
-            throw std::invalid_argument("Implementation type does not match primitive type");
-        if (instance.get_impl() != this)
-            throw std::invalid_argument(
-                "Trying to set_arguments for primitive implementation with mismatching primitive instance");
-
+        expect_correct_instance(instance);
         return set_arguments_impl(reinterpret_cast<typed_primitive_inst<PType>&>(instance));
     }
 
     void set_arguments(primitive_inst& instance, kernel_arguments_data& args) override {
-        OPENVINO_ASSERT(instance.type() == PType::type_id(), "[GPU] Implementation type ", instance.type(),
-                                                             " does not match primitive type ", PType::type_id());
-        if (instance.get_impl() != this)
-            throw std::invalid_argument(
-                "Trying to set_arguments for primitive implementation with mismatching primitive instance");
-
+        expect_correct_instance(instance);
         return set_arguments_impl(reinterpret_cast<typed_primitive_inst<PType>&>(instance), args);
     }
 
     virtual void set_arguments_impl(typed_primitive_inst<PType>& /*instance*/) {}
     virtual void set_arguments_impl(typed_primitive_inst<PType>& /*instance*/, kernel_arguments_data& /*args*/) {}
     virtual event::ptr execute_impl(const std::vector<event::ptr>& event, typed_primitive_inst<PType>& instance) = 0;
+    virtual event::ptr add_to_cmd_list_impl(const std::vector<event::ptr>& event, typed_primitive_inst<PType>& instance) { OPENVINO_NOT_IMPLEMENTED; }
+private:
+    void expect_correct_instance(primitive_inst& instance) {
+        OPENVINO_ASSERT(instance.type() == PType::type_id(), "[GPU] Implementation type ", instance.type(),
+                                                             " does not match primitive type ", PType::type_id());
+        if (instance.get_impl() != this)
+            throw std::invalid_argument(
+                "Trying to set_arguments for primitive implementation with mismatching primitive instance");
+    }
 };
 
 template <class PType>
