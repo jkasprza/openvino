@@ -115,6 +115,40 @@ inline std::istream& operator>>(std::istream& is, DumpTensors& val) {
     return is;
 }
 
+/// @brief Defines supported network execution modes
+enum class NetworkExecMode : uint8_t {
+    immediate = 0,              ///< All Primitives will be submitted to the device immediately
+    command_list = 1,           ///< Supported primitives will be added to regular command list
+    mutable_command_list = 2,   ///< Supported primitives will be added to mutable command list
+
+};
+
+inline std::ostream& operator<<(std::ostream& os, const NetworkExecMode& val) {
+    switch (val) {
+        case NetworkExecMode::immediate: os << "immediate"; break;
+        case NetworkExecMode::command_list: os << "command_list"; break;
+        case NetworkExecMode::mutable_command_list: os << "mutable_command_list"; break;
+        default: os << "unknown";
+    }
+
+    return os;
+}
+
+inline std::istream& operator>>(std::istream& is, NetworkExecMode& val) {
+    std::string str;
+    is >> str;
+    if (str == "immediate") {
+        val = NetworkExecMode::immediate;
+    } else if (str == "command_list") {
+        val = NetworkExecMode::command_list;
+    } else if (str == "mutable_command_list") {
+        val = NetworkExecMode::mutable_command_list;
+    } else {
+        OPENVINO_THROW("Unsupported NetworkExecMode value: ", str);
+    }
+    return is;
+}
+
 using GpuWeightlessCacheMap = std::unordered_map<size_t, ov::WeightlessCacheAttribute>;
 static constexpr Property<std::shared_ptr<GpuWeightlessCacheMap>, PropertyMutability::RW> weightless_attr{"GPU_WEIGHTLESS_ATTR"};
 
@@ -135,6 +169,7 @@ static constexpr Property<float, PropertyMutability::RW> buffers_preallocation_r
 static constexpr Property<size_t, PropertyMutability::RW> max_kernels_per_batch{"GPU_MAX_KERNELS_PER_BATCH"};
 static constexpr Property<bool, PropertyMutability::RW> use_onednn{"GPU_USE_ONEDNN"};
 static constexpr Property<bool, PropertyMutability::RW> use_cm{"GPU_USE_CM"};
+static constexpr Property<NetworkExecMode, PropertyMutability::RW> network_exec_mode{"GPU_NETWORK_EXEC_MODE"};
 
 static constexpr Property<bool, ov::PropertyMutability::RW> help{"HELP"};
 static constexpr Property<size_t, ov::PropertyMutability::RW> verbose{"VERBOSE"};

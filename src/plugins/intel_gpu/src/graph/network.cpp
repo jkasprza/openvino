@@ -174,8 +174,7 @@ network::network(program::ptr program, stream::ptr stream, bool is_internal, boo
     validate_primitives();
     preallocate_shape_info_buffers();
     add_default_output_chains();
-    // TODO: add option to disable slices
-    _slices = NetworkSlice::build_slices(_engine, _stream, _exec_order);
+    prepare_slices();
 }
 
 network::network(program::ptr program, bool is_internal, bool is_primary_stream)
@@ -335,6 +334,15 @@ void network::add_default_output_chains() {
     GPU_DEBUG_DEFINE_MEM_LOGGER("add_default_output_chains");
     for (auto& output : _outputs) {
         add_output_chain(output);
+    }
+}
+
+void network::prepare_slices() {
+    auto cfg = get_config();
+    if (cfg.get_network_exec_mode() == ov::intel_gpu::NetworkExecMode::command_list) {
+        _slices = NetworkSlice::build_slices(_engine, _stream, _exec_order);
+    } else {
+        _slices.clear();
     }
 }
 
@@ -760,14 +768,16 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     const bool needs_flushing = _is_dynamic;
     const size_t flush_frequency = needs_flushing ? 16 : 0;
     size_t executed_prims = 0;
-    size_t next_slice_i = 0;
+    auto next_slice = _slices.begin();
+    auto next_slice_start = (next_slice == _slices.end()) ? _exec_order.end() : next_slice->get_start();
     auto it = _exec_order.begin();
     while(it != _exec_order.end()) {
         auto& inst = *it;
-        if (next_slice_i < _slices.size() && it == _slices[next_slice_i].get_start()) {
-            _slices[next_slice_i].run(events);
-            it = _slices[next_slice_i].get_end();
-            next_slice_i++;
+        if (it == next_slice_start) {
+            next_slice->run(events);
+            it = next_slice->get_end();
+            std::advance(next_slice, 1);
+            next_slice_start = (next_slice == _slices.end()) ? _exec_order.end() : next_slice->get_start();
         } else {
             NODE_DEBUG(*inst);
 
