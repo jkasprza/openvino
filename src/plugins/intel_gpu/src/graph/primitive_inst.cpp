@@ -2207,7 +2207,7 @@ void primitive_inst::execute() {
 
 bool primitive_inst::supports_cmd_list() const {
     // TODO: We might be able to run unfused subgraph but need more info
-    return (_unfused_subgraph == nullptr) && _impl->supports_cmd_list();
+    return (_unfused_subgraph == nullptr) && (_impl != nullptr) && _impl->supports_cmd_list();
 }
 
 command_list::ptr primitive_inst::get_cmd_list() const {
