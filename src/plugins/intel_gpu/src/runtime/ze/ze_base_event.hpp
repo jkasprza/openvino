@@ -17,9 +17,21 @@ namespace ze {
 // Base interface for Level Zero events
 struct ze_base_event : public event {
 public:
+    static std::vector<ze_event_handle_t> get_handles(const std::vector<event::ptr> & events) {
+        std::vector<ze_event_handle_t> handles;
+        handles.reserve(events.size());
+        for (auto& ev : events) {
+            if (auto ze_base_ev = std::dynamic_pointer_cast<ze_base_event>(ev)) {
+                if (ze_base_ev->get_handle() != nullptr)
+                    handles.push_back(ze_base_ev->get_handle());
+            }
+        }
+        return handles;
+    }
+
     explicit ze_base_event(uint64_t queue_stamp)
-    : event()
-    , m_queue_stamp(queue_stamp) { }
+        : event()
+        , m_queue_stamp(queue_stamp) { }
     uint64_t get_queue_stamp() const { return m_queue_stamp; }
     void set_queue_stamp(uint64_t val) { m_queue_stamp = val; }
 

@@ -46,9 +46,7 @@ event::ptr ze_command_list::append_kernel_launch(kernel& k,
     auto& ze_kern = downcast<ze_kernel>(k);
     auto sync_method = m_stream.get_sync_method();
     bool set_out_event = needs_out_event || sync_method == SyncMethods::events;
-    // event queue timestamp will be incorrect
-    // even if we do everything correct here in case cmd list is rebuilt they will be incorrect
-    auto out_event = set_out_event ? m_stream.create_base_event() : std::make_shared<ze_empty_event>(0);
+    auto out_event = set_out_event ? m_stream.create_base_event() : m_stream.create_empty_event();
     ze_kern.launch(m_command_list, args_desc, args, events, out_event);
     return out_event;
 }

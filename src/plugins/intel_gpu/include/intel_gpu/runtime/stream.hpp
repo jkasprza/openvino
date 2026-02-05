@@ -75,7 +75,7 @@ public:
     SyncMethods get_sync_method() const { return m_sync_method; }
 
     virtual command_list::ptr create_cmd_list() = 0;
-    virtual event::ptr enqueue_cmd_list(const command_list& cmd_list, bool need_output_event = false) = 0;
+    virtual event::ptr enqueue_cmd_list(const command_list& cmd_list, std::vector<event::ptr> const& deps, bool need_output_event = false) = 0;
 
     static SyncMethods get_expected_sync_method(const ExecutionConfig& config);
 

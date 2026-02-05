@@ -43,12 +43,25 @@ std::vector<NetworkSlice> NetworkSlice::build_slices(engine& engine, stream::ptr
     return slices;
 }
 event::ptr NetworkSlice::run(const std::vector<event::ptr>& dep_events) {
+    auto iter = m_start;
+    while(iter != m_end) {
+        auto inst = iter->get();
+        inst->reset_events();
+        inst->prepare_primitive();
+        std::advance(iter, 1);
+    }
     if (!m_cmd_list) {
         build_cmd_list();
     } else {
         update_cmd_list();
     }
-    auto ev = m_stream->enqueue_cmd_list(*m_cmd_list, true);
+    auto ev = m_stream->enqueue_cmd_list(*m_cmd_list, dep_events);
+    iter = m_start;
+    while(iter != m_end) {
+        auto inst = iter->get();
+        inst->reset_flags();
+        std::advance(iter, 1);
+    }
     return ev;
 }
 
@@ -57,9 +70,6 @@ void NetworkSlice::build_cmd_list() {
     auto iter = m_start;
     while(iter != m_end) {
         auto inst = iter->get();
-        inst->reset_flags();
-        inst->reset_events();
-        inst->prepare_primitive();
         inst->add_to_cmd_list(m_cmd_list);
         std::advance(iter, 1);
     }
@@ -69,10 +79,7 @@ void NetworkSlice::build_cmd_list() {
 void NetworkSlice::update_cmd_list() {
     auto iter = m_start;
     while(iter != m_end) {
-        auto inst = iter->get();
-        inst->reset_flags();
-        inst->reset_events();
-        inst->prepare_primitive();
+        //auto inst = iter->get();
         bool needs_update = true; //TODO:
         bool can_mutate = false; //TODO:
         if (needs_update) {

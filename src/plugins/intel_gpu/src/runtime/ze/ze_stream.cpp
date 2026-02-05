@@ -101,7 +101,7 @@ event::ptr ze_stream::enqueue_kernel(kernel& kernel,
         sync_events(deps, is_output);
     }
     bool set_output_event = m_sync_method == SyncMethods::events || is_output;
-    auto ev = set_output_event ? create_base_event() : std::make_shared<ze_empty_event>(++m_queue_counter);
+    auto ev = set_output_event ? create_base_event() : create_empty_event();
     ze_kernel.launch(m_command_list, args_desc, args_data, *dep_events, ev);
 
     return ev;
@@ -119,13 +119,7 @@ event::ptr ze_stream::enqueue_marker(std::vector<ze_event::ptr> const& deps, boo
     }
 
     if (m_sync_method  == SyncMethods::events) {
-        std::vector<ze_event_handle_t> dep_events;
-        for (auto& dep : deps) {
-            if (auto ze_base_ev = std::dynamic_pointer_cast<ze_base_event>(dep)) {
-                if (ze_base_ev->get_handle() != nullptr)
-                    dep_events.push_back(ze_base_ev->get_handle());
-            }
-        }
+        auto dep_events = ze_base_event::get_handles(deps);
         if (dep_events.empty())
             return create_user_event(true);
 
@@ -162,6 +156,10 @@ event::ptr ze_stream::create_user_event(bool set) {
 
 event::ptr ze_stream::create_base_event() {
     return m_ev_factory->create_event(++m_queue_counter);
+}
+
+event::ptr ze_stream::create_empty_event() {
+    return std::make_shared<ze_empty_event>(++m_queue_counter);
 }
 
 std::unique_ptr<surfaces_lock> ze_stream::create_surfaces_lock(const std::vector<memory::ptr> &mem) const {
@@ -238,17 +236,18 @@ command_list::ptr ze_stream::create_cmd_list() {
     return std::make_shared<ze_command_list>(*this);
 }
 
-event::ptr ze_stream::enqueue_cmd_list(const command_list& cmd_list, bool need_output_event = false) {
+event::ptr ze_stream::enqueue_cmd_list(const command_list& cmd_list, std::vector<event::ptr> const& deps, bool need_output_event) {
     OPENVINO_ASSERT(_engine.get_device_info().supports_immediate_cmd_list_append, "[GPU] Command list enqueue is not supported");
     auto ze_list = dynamic_cast<const ze_command_list*>(&cmd_list);
     OPENVINO_ASSERT(ze_list != nullptr, "[GPU] Unexpected command list type");
+    auto wait_events = ze_base_event::get_handles(deps);
     uint32_t cmd_list_count = 1;
     ze_command_list_handle_t handle = ze_list->get_handle();
     bool set_output_event = m_sync_method == SyncMethods::events || need_output_event;
-    auto ev = set_output_event ? create_base_event() : std::make_shared<ze_empty_event>(++m_queue_counter);
+    auto ev = set_output_event ? create_base_event() : create_empty_event();
     auto ev_handle = std::dynamic_pointer_cast<ze_base_event>(ev)->get_handle();
     OV_ZE_EXPECT(zeCommandListImmediateAppendCommandListsExp(
-        m_command_list, cmd_list_count, &handle, ev_handle, 0, nullptr));
+        m_command_list, cmd_list_count, &handle, ev_handle, wait_events.size(), wait_events.size() > 0 ? wait_events.data() : nullptr));
     return ev;
 }
 

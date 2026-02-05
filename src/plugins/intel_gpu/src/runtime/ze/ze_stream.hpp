@@ -49,10 +49,11 @@ public:
     void enqueue_barrier() override;
     event::ptr create_user_event(bool set) override;
     event::ptr create_base_event() override;
+    event::ptr create_empty_event();
     std::unique_ptr<surfaces_lock> create_surfaces_lock(const std::vector<memory::ptr> &mem) const override;
 
     command_list::ptr create_cmd_list() override;
-    event::ptr enqueue_cmd_list(const command_list& cmd_list, bool need_output_event) override;
+    event::ptr enqueue_cmd_list(const command_list& cmd_list, std::vector<event::ptr> const& deps, bool need_output_event) override;
 
 #ifdef ENABLE_ONEDNN_FOR_GPU
     dnnl::stream& get_onednn_stream() override;

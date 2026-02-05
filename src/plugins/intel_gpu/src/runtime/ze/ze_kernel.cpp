@@ -234,15 +234,7 @@ void ze_kernel::set_arguments(const kernel_arguments_desc& args_desc, const kern
 }
 
 void ze_kernel::launch(ze_command_list_handle_t cmd_list_handle, const kernel_arguments_desc& args_desc, const kernel_arguments_data& args, const std::vector<event::ptr>& deps, event::ptr out_event) {
-    uint32_t dep_event_count = deps.size();
-    std::vector<ze_event_handle_t> wait_event_handles;
-    wait_event_handles.reserve(dep_event_count);
-    for (auto& dep : deps) {
-        if (auto ze_base_ev = std::dynamic_pointer_cast<ze_base_event>(dep)) {
-            if (ze_base_ev != nullptr && ze_base_ev->get_handle() != nullptr)
-                wait_event_handles.push_back(ze_base_ev->get_handle());
-        }
-    }
+    auto wait_event_handles = ze_base_event::get_handles(deps);
     auto ze_out_event = std::dynamic_pointer_cast<ze_base_event>(out_event);
 
     auto kernel_handle = get_kernel_handle();
