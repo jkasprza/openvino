@@ -142,6 +142,10 @@ public:
         return ev;
     }
 
+    bool supports_cmd_list() const override {
+        return false;
+    }
+
     [[nodiscard]] std::vector<BufferDescriptor> get_internal_buffer_descs(const RuntimeParams& params) const override {
         std::vector<BufferDescriptor> internal_buffers;
         auto desc = params.typed_desc<scaled_dot_product_attention>();

@@ -132,6 +132,10 @@ protected:
         return stream.aggregate_events(all_events, all_events.size() > 1);
     }
 
+    bool supports_cmd_list() const override {
+        return false;
+    }
+
     bool need_indirect_load(const gemm_inst& inst) const {
         auto desc = inst.get_typed_desc<gemm>();
         if (!desc->indirect_a && !desc->indirect_b)

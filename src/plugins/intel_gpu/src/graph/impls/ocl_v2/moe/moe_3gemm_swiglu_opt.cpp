@@ -1729,6 +1729,9 @@ public:
         // ret_env->wait();
         return ret_env;
     }
+    bool supports_cmd_list() const override {
+        return false;
+    }
 };
 
 }  // namespace

@@ -43,18 +43,22 @@ std::vector<NetworkSlice> NetworkSlice::build_slices(engine& engine, stream::ptr
     return slices;
 }
 event::ptr NetworkSlice::run(const std::vector<event::ptr>& dep_events) {
+    // Create new cmd list for every run
+    m_cmd_list = m_stream->create_cmd_list();
     auto iter = m_start;
     while(iter != m_end) {
         auto inst = iter->get();
         inst->reset_events();
         inst->prepare_primitive();
+        inst->add_to_cmd_list(m_cmd_list);
         std::advance(iter, 1);
     }
-    if (!m_cmd_list) {
-        build_cmd_list();
-    } else {
-        update_cmd_list();
-    }
+    m_cmd_list->close();
+    //if (!m_cmd_list) {
+    //    build_cmd_list();
+    //} else {
+    //    update_cmd_list();
+    //}
     auto ev = m_stream->enqueue_cmd_list(*m_cmd_list, dep_events);
     iter = m_start;
     while(iter != m_end) {

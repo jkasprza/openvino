@@ -103,6 +103,10 @@ struct custom_gpu_primitive_impl : typed_primitive_impl<custom_gpu_primitive> {
         return stream.enqueue_kernel(*_kernels.front(), cl_kernel.get()->params, args, events, instance.is_output());
     }
 
+    bool supports_cmd_list() const override {
+        return false;
+    }
+
     std::vector<kernel::ptr> get_kernels() const override {
         return _kernels;
     }

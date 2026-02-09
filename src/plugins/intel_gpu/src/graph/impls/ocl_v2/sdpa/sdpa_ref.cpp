@@ -140,6 +140,9 @@ public:
         }
         return execute_stage(events, instance, regular);
     }
+    bool supports_cmd_list() const override {
+        return false;
+    }
 
     [[nodiscard]] std::vector<BufferDescriptor> get_internal_buffer_descs(const kernel_impl_params& params) const override {
         std::vector<BufferDescriptor> internal_buffers;

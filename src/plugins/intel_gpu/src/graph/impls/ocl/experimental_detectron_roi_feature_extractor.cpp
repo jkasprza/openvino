@@ -27,6 +27,9 @@ struct experimental_detectron_roi_feature_extractor_impl : public typed_primitiv
         instance.copy_rois_input_to_second_output();
         return parent::execute_impl(events, instance);
     }
+    bool supports_cmd_list() const override {
+        return false;
+    }
 
 public:
     static kernel_params_t get_kernel_params(const kernel_impl_params& impl_param) {

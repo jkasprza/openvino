@@ -91,6 +91,9 @@ public:
 #endif
         return nullptr;
     }
+    bool supports_cmd_list() const override {
+        return false;
+    }
 };
 }  // namespace
 

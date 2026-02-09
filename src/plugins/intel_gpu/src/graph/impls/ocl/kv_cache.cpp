@@ -281,6 +281,10 @@ struct kv_cache_impl : multi_stage_primitive<kv_cache> {
         }
     }
 
+    bool supports_cmd_list() const override {
+        return false;
+    }
+
     static layout get_beam_table_layout(const kernel_impl_params& impl_param) {
         const auto& primitive = impl_param.typed_desc<kv_cache>();
         auto kv_layout = impl_param.get_input_layout(0);

@@ -193,6 +193,10 @@ public:
         }
         return PrimitiveImplCM::execute(events, instance);
     }
+
+    bool supports_cmd_list() const override {
+        return false;
+    }
 };
 
 }  // namespace

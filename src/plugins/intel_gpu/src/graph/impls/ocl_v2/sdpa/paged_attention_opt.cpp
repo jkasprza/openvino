@@ -1301,6 +1301,10 @@ public:
         return res_event[0];
     }
 
+    bool supports_cmd_list() const override {
+        return false;
+    }
+
     bool requires_update(primitive_inst& inst, const kernel_impl_params& impl_params) const override {
         const auto stage = get_paged_attention_stage(impl_params);
 
