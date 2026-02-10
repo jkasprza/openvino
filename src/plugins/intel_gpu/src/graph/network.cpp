@@ -340,7 +340,8 @@ void network::add_default_output_chains() {
 void network::prepare_slices() {
     auto cfg = get_config();
     if (cfg.get_network_exec_mode() == ov::intel_gpu::NetworkExecMode::command_list) {
-        _slices = NetworkSlice::build_slices(_engine, _stream, _exec_order);
+        size_t max_slice_size = 128;
+        _slices = NetworkSlice::build_slices(_engine, _stream, _exec_order, max_slice_size);
     } else {
         _slices.clear();
     }
