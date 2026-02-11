@@ -35,7 +35,6 @@ ze_command_list::ze_command_list(ze_stream &stream)
     }*/
 
     OV_ZE_EXPECT(zeCommandListCreate(engine.get_context(), engine.get_device(), &command_list_desc, &m_command_list));
-    OV_ZE_EXPECT(zeCommandListAppendBarrier(m_command_list, nullptr, 0, nullptr));
 }
 
 event::ptr ze_command_list::append_kernel_launch(kernel& k,
@@ -45,6 +44,13 @@ event::ptr ze_command_list::append_kernel_launch(kernel& k,
         bool needs_out_event) {
     auto& ze_kern = downcast<ze_kernel>(k);
     auto sync_method = m_stream.get_sync_method();
+    if (sync_method == SyncMethods::barriers) {
+        auto dep_stamp = ze_base_event::get_last_stamp(events);
+        if (dep_stamp > m_last_barrier) {
+            m_last_barrier = dep_stamp;
+            OV_ZE_EXPECT(zeCommandListAppendBarrier(m_command_list, nullptr, 0, nullptr));
+        }
+    }
     bool set_out_event = needs_out_event || sync_method == SyncMethods::events;
     auto out_event = set_out_event ? m_stream.create_base_event() : m_stream.create_empty_event();
     ze_kern.launch(m_command_list, args_desc, args, events, out_event);

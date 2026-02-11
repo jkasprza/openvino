@@ -36,6 +36,7 @@ private:
 
     ze_stream &m_stream;
     ze_command_list_handle_t m_command_list = nullptr;
+    uint64_t m_last_barrier = 0;
 };
 
 }  // namespace ze

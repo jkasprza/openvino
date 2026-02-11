@@ -28,6 +28,16 @@ public:
         }
         return handles;
     }
+    static uint64_t get_last_stamp(const std::vector<event::ptr> & events) {
+        uint64_t stamp = 0;
+        for (auto& ev : events) {
+            if (auto ze_base_ev = std::dynamic_pointer_cast<ze_base_event>(ev)) {
+                auto new_stamp = ze_base_ev->get_queue_stamp();
+                stamp = (stamp > new_stamp) ? stamp : new_stamp;
+            }
+        }
+        return stamp;
+    }
 
     explicit ze_base_event(uint64_t queue_stamp)
         : event()
