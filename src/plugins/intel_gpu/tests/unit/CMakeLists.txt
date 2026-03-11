@@ -72,8 +72,8 @@ set(SOURCES_ALL
     ${SOURCES_MAIN}
     ${SOURCES_NATVIS}
     ${TEST_COMMON_SOURCE_FILES}
+    ${UNIT_TEST_OBJECTS}
   )
-
 add_executable(${TARGET_NAME} ${SOURCES_ALL})
 target_compile_definitions(${TARGET_NAME} PRIVATE CI_BUILD_NUMBER="")
 

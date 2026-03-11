@@ -3,5 +3,6 @@
 #
 
 add_subdirectory(common)
+add_subdirectory(unit_bdd)
 add_subdirectory(unit)
 add_subdirectory(functional)
