@@ -68,6 +68,10 @@ std::shared_ptr<ze_module_holder> ze_kernel_builder::build_module_l0(const void 
             module_desc.format = ze_module_format_oclc;
             break;
         }
+        case KernelFormat::INTERMEDIATE: {
+            module_desc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+            break;
+        }
         case KernelFormat::NATIVE_BIN: {
             module_desc.format = ZE_MODULE_FORMAT_NATIVE;
             break;

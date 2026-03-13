@@ -334,7 +334,7 @@ void kernels_cache::build_batch(const batch_program& batch, compiled_kernels& co
         _builder->build_kernels(precompiled.data(), precompiled.size(), KernelFormat::NATIVE_BIN, "", kernels);
     } else {
         auto combined_source = join_strings(batch.source);
-        _builder->build_kernels(combined_source.data(), combined_source.size(), KernelFormat::SOURCE, batch.options, kernels);
+        _builder->build_kernels(combined_source.data(), combined_source.size(), get_kernel_format(batch.language), batch.options, kernels);
         OPENVINO_ASSERT(kernels.size() > 0, "[GPU] Expected to compile more than 0 kernels in the batch");
         OPENVINO_ASSERT(kernels.size() == batch.kernels_counter, "[GPU] Number of compiled kernels is different than kernel batch size");
         if (dump_sources && dump_file.good()) {

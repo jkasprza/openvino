@@ -35,6 +35,10 @@ class ocl_kernel_builder : public kernel_builder{
                 program_handle = clCreateProgramWithSource(context, count, strings, lenghts, &err);
                 break;
             }
+            case KernelFormat::INTERMEDIATE: {
+                program_handle = clCreateProgramWithIL(context, src, src_bytes, &err);
+                break;
+            }
             case KernelFormat::NATIVE_BIN: {
                 const unsigned char **binaries = reinterpret_cast<const unsigned char**>(&src);
                 const size_t *lenghts = &src_bytes;

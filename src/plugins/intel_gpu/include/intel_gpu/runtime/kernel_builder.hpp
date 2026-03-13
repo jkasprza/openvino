@@ -5,6 +5,7 @@
 #pragma once
 
 #include "kernel.hpp"
+#include "kernel_args.hpp"
 
 #include <memory>
 #include <string>
@@ -14,9 +15,25 @@ namespace cldnn {
 
 /// @brief Defines possible kernel formats
 enum class KernelFormat {
-    SOURCE,     ///< source code format
-    NATIVE_BIN, ///< device native binary format
+    SOURCE,         ///< source code format
+    INTERMEDIATE,   ///< Intermediate language format
+    NATIVE_BIN,     ///< device native binary format
 };
+
+inline KernelFormat get_kernel_format(const kernel_language &lang) {
+    switch (lang) {
+        case kernel_language::OCLC:
+        case kernel_language::CM:
+        case kernel_language::OCLC_V2: {
+            return KernelFormat::SOURCE;
+        }
+        case kernel_language::SPIRV: {
+            return KernelFormat::INTERMEDIATE;
+        }
+        default:
+            OPENVINO_THROW("Unexpected kernel language");
+    }
+}
 
 /// @brief Interface for building the GPU kernels. Implementations must be thread-safe to support case where multiple threads use single builder.
 class kernel_builder {
