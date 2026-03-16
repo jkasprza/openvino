@@ -7,27 +7,20 @@
 #include <cctype>
 
 #include "intel_gpu/runtime/kernel_args.hpp"
-#include "kernels_db.hpp"
 
 namespace ov::intel_gpu::spirv {
 
-std::string KernelGenerator::build_code(std::string_view template_name, const JitConstants& jit_constants, const std::string& entry_point) {
-    return std::string(SourcesDB::get_kernel_template(template_name));
-}
-
 KernelData KernelGenerator::get_kernel_data(const RuntimeParams& params) const {
-    auto jit = get_jit_constants(params);
-
     KernelData kd;
     kd.code = std::make_shared<KernelString>();
     kd.code->language = KernelLanguage::SPIRV;
-    kd.code->entry_point = get_entry_point(params);
-    kd.code->jit = "";
+    kd.code->entry_point = m_entry_point;
+    kd.code->jit = {};
     kd.code->undefs = "";
-    kd.code->options = get_build_options(params);
+    kd.code->options = "";
     kd.code->batch_compilation = false;
     kd.code->has_microkernels = false;
-    kd.code->str = build_code(m_kernel_name, jit, kd.code->entry_point);
+    kd.code->str = get_spirv();
 
     kd.params.arguments = get_arguments_desc(params);
     kd.params.layerID = params.desc->id;
@@ -36,18 +29,6 @@ KernelData KernelGenerator::get_kernel_data(const RuntimeParams& params) const {
     kd.need_dispatch_data_update = true;
 
     return kd;
-}
-
-std::string KernelGenerator::get_entry_point(const RuntimeParams& params) const {
-    return m_kernel_name;
-}
-
-std::string KernelGenerator::get_build_options(const RuntimeParams& params) const {
-    return "";
-}
-
-JitConstants KernelGenerator::get_jit_constants(const RuntimeParams& params) const {
-    return {};
 }
 
 Arguments KernelGenerator::get_arguments_desc(const RuntimeParams& params) const {
