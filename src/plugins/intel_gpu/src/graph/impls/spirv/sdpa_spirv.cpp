@@ -36,8 +36,8 @@ DispatchDataFunc SDPASplitGenerator::get_dispatch_data_func() const {
             size_t H = 32;
             size_t WG = 128;
             size_t SPLITS = 4;
-            wgs.global = {H * WG, SPLITS, 1};
-            wgs.local = {WG, 1, 1};
+            wgs.global = {SPLITS, H * WG, 1};
+            wgs.local = {1, WG, 1};
 
             auto& scalars = kd.params.scalars;
             scalars.clear();
@@ -81,7 +81,7 @@ DispatchDataFunc SDPAReduceGenerator::get_dispatch_data_func() const {
 
             auto& local_mem = kd.params.local_memory_args;
             local_mem.clear();
-            local_mem.push_back(4 * sizeof(float));
+            local_mem.push_back((4 + 1) * sizeof(float));
     }};
 }
 
