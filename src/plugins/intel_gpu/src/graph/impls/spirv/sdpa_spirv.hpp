@@ -162,6 +162,11 @@ struct SDPAImplManager : public ImplementationManager {
     [[nodiscard]] bool validate_impl(const program_node& node) const override {
         const auto desc = node.as<scaled_dot_product_attention>().get_primitive();
 
+        const auto& config = node.get_program().get_config();
+        if (!config.get_use_spirv()) {
+            return false;
+        }
+
         // Not sure about those but better assume they are not supported
         if (desc->is_causal || desc->has_sink_input || desc->indirect_axis != -1 || desc->is_kv_compressed) {
             return false;
