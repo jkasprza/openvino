@@ -24,7 +24,10 @@ Arguments SDPASplitGenerator::get_arguments_desc(const RuntimeParams& params) co
     auto partial_l_arg = argument_desc{ArgumentDescriptor::Types::INTERNAL_BUFFER, 2};
     auto scale_arg = argument_desc{ArgumentDescriptor::Types::SCALAR, 0};
     auto mask_mode_arg = argument_desc{ArgumentDescriptor::Types::SCALAR, 1};
-    return {query_arg, key_arg, value_arg, mask_arg, partial_out_arg, partial_m_arg, partial_l_arg, scale_arg, mask_mode_arg};
+    auto smem_out_arg = argument_desc{ArgumentDescriptor::Types::LOCAL_MEMORY_SIZE, 0};
+    auto smem_m_arg = argument_desc{ArgumentDescriptor::Types::LOCAL_MEMORY_SIZE, 1};
+    auto smem_l_arg = argument_desc{ArgumentDescriptor::Types::LOCAL_MEMORY_SIZE, 2};
+    return {query_arg, key_arg, value_arg, mask_arg, partial_out_arg, partial_m_arg, partial_l_arg, scale_arg, mask_mode_arg, smem_out_arg, smem_m_arg, smem_l_arg};
 }
 
 DispatchDataFunc SDPASplitGenerator::get_dispatch_data_func() const {
@@ -46,6 +49,12 @@ DispatchDataFunc SDPASplitGenerator::get_dispatch_data_func() const {
             mask_mode_desc.v.s32 = 0; // HARDCODED FOR TESTING
             scalars.push_back(scale_desc);
             scalars.push_back(mask_mode_desc);
+
+            auto& local_mem = kd.params.local_memory_args;
+            local_mem.clear();
+            local_mem.push_back(8 * 128 * sizeof(float));
+            local_mem.push_back(8 * sizeof(float));
+            local_mem.push_back(8 * sizeof(float));
     }};
 }
 
@@ -58,7 +67,8 @@ Arguments SDPAReduceGenerator::get_arguments_desc(const RuntimeParams& params) c
     auto partial_m_arg = argument_desc{ArgumentDescriptor::Types::INTERNAL_BUFFER, 1};
     auto partial_l_arg = argument_desc{ArgumentDescriptor::Types::INTERNAL_BUFFER, 2};
     auto out_arg = argument_desc{ArgumentDescriptor::Types::OUTPUT, 0};
-    return {partial_out_arg, partial_m_arg, partial_l_arg, out_arg};
+    auto smem_w = argument_desc{ArgumentDescriptor::Types::LOCAL_MEMORY_SIZE, 0};
+    return {partial_out_arg, partial_m_arg, partial_l_arg, out_arg, smem_w};
 }
 DispatchDataFunc SDPAReduceGenerator::get_dispatch_data_func() const {
 
@@ -68,6 +78,10 @@ DispatchDataFunc SDPAReduceGenerator::get_dispatch_data_func() const {
             size_t WG = 128;
             wgs.global = {H * WG, 1, 1};
             wgs.local = {WG, 1, 1};
+
+            auto& local_mem = kd.params.local_memory_args;
+            local_mem.clear();
+            local_mem.push_back(4 * sizeof(float));
     }};
 }
 
