@@ -9,6 +9,7 @@
 #include "intel_gpu/plugin/usm_host_tensor.hpp"
 #include "intel_gpu/runtime/itt.hpp"
 #include "intel_gpu/runtime/device_query.hpp"
+#include "intel_gpu/runtime/ocl_ze_converter.hpp"
 #include <memory>
 
 namespace ov::intel_gpu {
@@ -42,6 +43,7 @@ RemoteContextImpl::RemoteContextImpl(const std::map<std::string, RemoteContextIm
 
     if (params.size()) {
         auto ctx_type = extract_object(params, ov::intel_gpu::context_type);
+        auto rt_type = cldnn::device_query::get_default_runtime_type();
 
         if (ctx_type == ov::intel_gpu::ContextType::OCL) {
             context_id = extract_object(params, ov::intel_gpu::ocl_context);
@@ -53,8 +55,18 @@ RemoteContextImpl::RemoteContextImpl(const std::map<std::string, RemoteContextIm
 
             if (params.find(ov::intel_gpu::ocl_context_device_id.name()) != params.end())
                 ctx_device_id = extract_object(params, ov::intel_gpu::ocl_context_device_id);
+            OPENVINO_ASSERT(rt_type == cldnn::runtime_types::ocl || rt_type == cldnn::runtime_types::ze,
+                "[GPU] Expected OCL or L0 runtime type for OCL context");
+            if (rt_type == cldnn::runtime_types::ze) {
+                if (m_external_queue != nullptr) {
+                    m_external_queue = cldnn::ocl_ze_converter::convert_ocl_queue_to_ze(m_external_queue);
+                }
+                context_id = cldnn::ocl_ze_converter::convert_ocl_context_to_ze(context_id);
+                m_type = ContextType::OCL; //FIXME: workaround for check src/inference/src/cpp/remote_context.cpp:43
+            }
         } else if (ctx_type == ov::intel_gpu::ContextType::VA_SHARED) {
             m_va_display = extract_object(params, ov::intel_gpu::va_device);
+            OPENVINO_ASSERT(rt_type == cldnn::runtime_types::ocl, "[GPU] Expected OCL runtime type for VA_SHARED context");
             OPENVINO_ASSERT(m_va_display != nullptr, "[GPU] Can't create shared VA/DX context as user handle is nullptr! Params:\n", params);
             m_type = ContextType::VA_SHARED;
         } else {

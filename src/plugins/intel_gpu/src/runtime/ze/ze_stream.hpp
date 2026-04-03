@@ -19,6 +19,7 @@ public:
     ze_command_list_handle_t get_queue() const { return m_command_list; }
 
     ze_stream(const ze_engine& engine, const ExecutionConfig& config);
+    ze_stream(const ze_engine &engine, const ExecutionConfig& config, void *handle);
     ze_stream(ze_stream&& other)
         : stream(other.m_queue_type, other.m_sync_method)
         , _engine(other._engine)
@@ -65,6 +66,7 @@ private:
     std::shared_ptr<ze_event> m_last_barrier_ev = nullptr;
     std::shared_ptr<ze_base_event_factory> m_ev_factory;
     std::shared_ptr<ze_base_event_factory> m_user_ev_factory;
+    bool m_owns_command_list;
 
 #ifdef ENABLE_ONEDNN_FOR_GPU
     std::shared_ptr<dnnl::stream> _onednn_stream = nullptr;

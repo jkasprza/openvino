@@ -21,6 +21,7 @@ struct lockable_gpu_mem {
 
     std::mutex _mutex;
     unsigned _lock_count;
+    bool needs_write_back;
     void* _mapped_ptr;
 };
 

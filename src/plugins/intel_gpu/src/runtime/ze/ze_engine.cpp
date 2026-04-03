@@ -4,6 +4,7 @@
 
 #include "ze_engine.hpp"
 #include "intel_gpu/runtime/utils.hpp"
+#include "intel_gpu/runtime/ocl_ze_converter.hpp"
 #include "openvino/core/except.hpp"
 #include "ze_kernel_builder.hpp"
 #include "ze_api.h"
@@ -117,6 +118,16 @@ memory::ptr ze_engine::reinterpret_handle(const layout& new_layout, shared_mem_p
                             "[GPU] shared USM buffer has smaller size (", actual_mem_size,
                             ") than specified layout (", requested_mem_size, ")");
         return std::make_shared<ze::gpu_usm>(this, new_layout, usm_buffer, nullptr);
+    } else if (params.mem_type == shared_mem_type::shared_mem_buffer) {
+        void *ze_mem = ocl_ze_converter::convert_ocl_buffer_to_ze(params.mem);
+        size_t actual_mem_size = 0;
+        OV_ZE_EXPECT(zeMemGetAddressRange(get_context(), ze_mem, nullptr, &actual_mem_size));
+        auto requested_mem_size = new_layout.bytes_count();
+        OPENVINO_ASSERT(actual_mem_size >= requested_mem_size,
+                        "[GPU] shared buffer has smaller size (", actual_mem_size,
+                        ") than specified layout (", requested_mem_size, ")");
+        ze::UsmMemory usm_buffer(get_context(), get_device(), ze_mem);
+        return std::make_shared<ze::gpu_usm>(this, new_layout, usm_buffer, nullptr);
     } else {
         OPENVINO_THROW("[GPU] Unsupported shared memory type: ", params.mem_type);
     }
@@ -165,7 +176,7 @@ stream::ptr ze_engine::create_stream(const ExecutionConfig& config) const {
 }
 
 stream::ptr ze_engine::create_stream(const ExecutionConfig& config, void* handle) const {
-    OPENVINO_NOT_IMPLEMENTED;
+    return std::make_shared<ze_stream>(*this, config, handle);
 }
 
 std::shared_ptr<cldnn::engine> ze_engine::create(const device::ptr device, runtime_types runtime_type) {

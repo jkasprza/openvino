@@ -214,6 +214,7 @@ ze_stream::ze_stream(const ze_engine &engine, const ExecutionConfig& config)
     }
 
     OV_ZE_EXPECT(zeCommandListCreateImmediate(_engine.get_context(), _engine.get_device(), &command_queue_desc, &m_command_list));
+    m_owns_command_list = true;
     bool use_counter_based_events = m_queue_type == QueueTypes::in_order && info.supports_counter_based_events;
     m_user_ev_factory = std::make_shared<ze_event_factory>(engine, config.get_enable_profiling());
     if (use_counter_based_events) {
@@ -229,12 +230,32 @@ ze_stream::ze_stream(const ze_engine &engine, const ExecutionConfig& config)
         << ")" << std::endl;
 }
 
+ze_stream::ze_stream(const ze_engine &engine, const ExecutionConfig& config, void *handle)
+    : stream(config.get_queue_type(), stream::get_expected_sync_method(config))
+    , _engine(engine) {
+    m_command_list = reinterpret_cast<ze_command_list_handle_t>(handle);
+    m_owns_command_list = false;
+    const auto &info = engine.get_device_info();
+    bool use_counter_based_events = m_queue_type == QueueTypes::in_order && info.supports_counter_based_events;
+
+    m_user_ev_factory = std::make_shared<ze_event_factory>(engine, config.get_enable_profiling());
+    if (use_counter_based_events) {
+        m_ev_factory = std::make_shared<ze_counter_based_event_factory>(engine, config.get_enable_profiling());
+    } else {
+        // If counter based events are not supported or not used, use the same factory for both user and base events
+        m_ev_factory = m_user_ev_factory;
+    }
+    GPU_DEBUG_INFO << "[GPU] Created L0 stream from shared handle ("
+        << "use_counter_based_events=" << use_counter_based_events
+        << ")" << std::endl;
+}
+
 ze_stream::~ze_stream() {
 #ifdef ENABLE_ONEDNN_FOR_GPU
     // Destroy OneDNN stream before destroying command list
     _onednn_stream.reset();
 #endif
-    if (m_command_list != nullptr)
+    if (m_command_list != nullptr && m_owns_command_list)
         OV_ZE_WARN(zeCommandListDestroy(m_command_list));
 }
 
