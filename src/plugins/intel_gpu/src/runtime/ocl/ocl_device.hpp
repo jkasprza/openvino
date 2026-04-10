@@ -45,6 +45,17 @@ public:
 
     const device_info& get_info() const override { return _info; }
     memory_capabilities get_mem_caps() const override { return _mem_caps; }
+    const runtime_types get_runtime_type() const override { return cldnn::runtime_types::ocl; }
+    rt_handle get_handle(runtime_resources resource) const override {
+        switch (resource) {
+            case runtime_resources::OCL_CONTEXT:
+                return static_cast<rt_handle>(_context.get());
+            case runtime_resources::OCL_DEVICE:
+                return static_cast<rt_handle>(_device.get());
+            default:
+                OPENVINO_THROW("[GPU] Unsupported resource type requested from ocl_device");
+        }
+    }
 
     const cl::Device& get_device() const { return _device; }
     cl::Device& get_device() { return _device; }

@@ -61,7 +61,14 @@ public:
     cldnn::engine& get_engine();
     const cldnn::engine& get_engine() const;
     const cldnn::device& get_device() { return *m_device; }
-    ov::intel_gpu::gpu_handle_param get_external_queue() const { return m_external_queue; }
+    ov::intel_gpu::gpu_handle_param get_external_queue() const {
+        if (m_rt_type == cldnn::runtime_types::ze) {
+            return m_ze_cmd_list;
+        } else if (m_rt_type == cldnn::runtime_types::ocl) {
+            return m_ocl_queue;
+        }
+        OPENVINO_THROW("[GPU] Unsupported runtime type ", m_rt_type);
+    }
 
     cldnn::memory::ptr try_get_cached_memory(size_t hash);
     void add_to_cache(size_t hash, cldnn::memory::ptr memory);
@@ -92,13 +99,12 @@ private:
     std::shared_ptr<cldnn::device> m_device;
     std::shared_ptr<cldnn::engine> m_engine;
     ov::intel_gpu::gpu_handle_param m_va_display = nullptr;
-    ov::intel_gpu::gpu_handle_param m_external_queue = nullptr;
+    ov::intel_gpu::gpu_handle_param m_ocl_context = nullptr;
+    ov::intel_gpu::gpu_handle_param m_ocl_queue = nullptr;
+    ov::intel_gpu::gpu_handle_param m_ze_context = nullptr;
+    ov::intel_gpu::gpu_handle_param m_ze_cmd_list = nullptr;
 
-#ifdef OV_GPU_WITH_ZE_RT
-    ContextType m_type = ContextType::ZE;
-#else
     ContextType m_type = ContextType::OCL;
-#endif
     std::string m_device_name = "";
     static const size_t cache_capacity = 100;
     cldnn::LruCache<size_t, cldnn::memory::ptr> m_memory_cache = cldnn::LruCache<size_t, cldnn::memory::ptr>(cache_capacity);
@@ -106,6 +112,7 @@ private:
 
     bool m_is_initialized = false;
     std::once_flag m_initialize_flag;
+    cldnn::runtime_types m_rt_type;
 
     ov::AnyMap properties;
 };

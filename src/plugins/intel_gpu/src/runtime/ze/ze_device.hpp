@@ -18,6 +18,17 @@ public:
 
     const device_info& get_info() const override { return _info; }
     memory_capabilities get_mem_caps() const override { return _mem_caps; }
+    const runtime_types get_runtime_type() const override { return cldnn::runtime_types::ze; }
+    rt_handle get_handle(runtime_resources resource) const override {
+        switch (resource) {
+            case runtime_resources::ZE_CONTEXT:
+                return static_cast<rt_handle>(_context);
+            case runtime_resources::ZE_DEVICE:
+                return static_cast<rt_handle>(_device);
+            default:
+                OPENVINO_THROW("[GPU] Unsupported resource type requested from ze_device");
+        }
+    }
 
     void initialize() override;
     bool is_initialized() const override;

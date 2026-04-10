@@ -41,5 +41,14 @@ inline std::ostream& operator<<(std::ostream& os, const runtime_types& type) {
 
     return os;
 }
+/// @brief Runtime agnostic handle for runtime resources
+using rt_handle = void*;
+/// @brief Defines runtime resources
+enum class runtime_resources : int32_t {
+    OCL_CONTEXT,
+    OCL_DEVICE,
+    ZE_CONTEXT,
+    ZE_DEVICE,
+};
 
 }  // namespace cldnn

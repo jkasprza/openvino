@@ -58,8 +58,8 @@ inline std::istream& operator>>(std::istream& is, ContextType& context_type) {
 /** @endcond */
 
 /**
- * @brief Shared device context type: can be either pure OpenCL (OCL)
- * or shared video decoder (VA_SHARED) context
+ * @brief Shared device context type: can be either pure OpenCL (OCL) context,
+ * shared video decoder (VA_SHARED) context, or pure Level0 (ZE) context
  * @ingroup ov_runtime_ocl_gpu_cpp_api
  */
 static constexpr Property<ContextType> context_type{"CONTEXT_TYPE"};
@@ -97,6 +97,19 @@ static constexpr Property<gpu_handle_param> ocl_queue{"OCL_QUEUE"};
  * @ingroup ov_runtime_ocl_gpu_cpp_api
  */
 static constexpr Property<gpu_handle_param> va_device{"VA_DEVICE"};
+
+/**
+ * @brief This key identifies Level Zero immediate command list handle in a shared context
+ * @ingroup ov_runtime_ocl_gpu_cpp_api
+ */
+static constexpr Property<gpu_handle_param> ze_cmd_list{"ZE_CMD_LIST"};
+
+/**
+ * @brief This key identifies Level Zero context handle
+ * in a shared context or shared memory blob parameter map
+ * @ingroup ov_runtime_ocl_gpu_cpp_api
+ */
+static constexpr Property<gpu_handle_param> ze_context{"ZE_CONTEXT"};
 
 /**
  * @brief Enum to define the type of the shared memory buffer

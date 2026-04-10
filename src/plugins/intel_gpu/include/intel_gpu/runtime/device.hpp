@@ -7,6 +7,7 @@
 #include "device_info.hpp"
 #include "memory_caps.hpp"
 #include "layout.hpp"
+#include "engine_configuration.hpp"
 
 #include <memory>
 
@@ -20,6 +21,9 @@ public:
     using ptr = std::shared_ptr<device>;
     virtual const device_info& get_info() const = 0;
     virtual memory_capabilities get_mem_caps() const = 0;
+    virtual const runtime_types get_runtime_type() const = 0;
+    virtual rt_handle get_handle(runtime_resources resource) const = 0;
+
 
     virtual void initialize() = 0;
     virtual bool is_initialized() const = 0;

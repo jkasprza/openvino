@@ -8,10 +8,10 @@
 namespace cldnn {
 namespace {
 
-static constexpr cl_context_info CL_L0_CONTEXT_HANDLE = 0x10021;
-static constexpr cl_context_info CL_L0_IMMEDIATE_CMD_LIST_HANDLE = 0x10022;
-//static constexpr cl_context_info CL_L0_EVENT_HANDLE = 0x10023;
-static constexpr cl_context_info CL_L0_MEM_OBJ_HANDLE = 0x10024;
+static constexpr cl_uint CL_L0_CONTEXT_HANDLE = 0x10021;
+static constexpr cl_uint CL_L0_IMMEDIATE_CMD_LIST_HANDLE = 0x10022;
+//static constexpr cl_uint CL_L0_EVENT_HANDLE = 0x10023;
+static constexpr cl_uint CL_L0_MEM_OBJ_HANDLE = 0x10024;
 
 } // namespace
 
@@ -46,6 +46,36 @@ ze_handle ocl_ze_converter::convert_ocl_buffer_to_ze(ocl_handle ocl_buffer) {
     OPENVINO_ASSERT(error == CL_SUCCESS, "[GPU] clGetMemObjectInfo error code: ", std::to_string(error));
     OPENVINO_ASSERT(ze_mem != nullptr, "[GPU] Received nullptr when converting OCL buffer");
     return ze_mem;
+}
+
+ocl_handle ocl_ze_converter::convert_ze_context_to_ocl(ze_handle ze_ctx, ocl_handle ocl_device) {
+    cl_context_properties properties[] = {CL_L0_CONTEXT_HANDLE, reinterpret_cast<cl_context_properties>(ze_ctx), 0};
+    constexpr cl_uint num_devices = 1;
+    cl_int error;
+    auto converted_context = clCreateContext(properties, num_devices, reinterpret_cast<cl_device_id*>(&ocl_device), nullptr, nullptr, &error);
+    OPENVINO_ASSERT(error == CL_SUCCESS, "[GPU] clCreateContext error code: ", std::to_string(error));
+    OPENVINO_ASSERT(converted_context != nullptr, "[GPU] Received nullptr when converting ZE context");
+    return converted_context;
+}
+
+ocl_handle ocl_ze_converter::convert_ze_cmd_list_to_ocl(ocl_handle ocl_ctx, ocl_handle ocl_device, ze_handle ze_cmd_list) {
+    cl_mem_properties properties[] = {CL_L0_IMMEDIATE_CMD_LIST_HANDLE, reinterpret_cast<cl_properties>(ze_cmd_list), 0};
+    cl_int error;
+    auto converted_queue = clCreateCommandQueueWithProperties(reinterpret_cast<cl_context>(ocl_ctx), reinterpret_cast<cl_device_id>(ocl_device), properties, &error);
+    OPENVINO_ASSERT(error == CL_SUCCESS, "[GPU] clCreateCommandQueueWithProperties error code: ", std::to_string(error));
+    OPENVINO_ASSERT(converted_queue != nullptr, "[GPU] Received nullptr when converting ZE command list");
+    return converted_queue;
+}
+
+ocl_handle ocl_ze_converter::convert_ze_buffer_to_ocl(ocl_handle ocl_ctx, ze_handle ze_buffer) {
+    cl_mem_properties properties[] = {CL_L0_MEM_OBJ_HANDLE, reinterpret_cast<cl_mem_properties>(ze_buffer), 0};
+    cl_int error;
+    // Size of the buffer should not be relevant for the conversion
+    constexpr size_t size = 0;
+    cl_mem converted_mem = clCreateBufferWithProperties(reinterpret_cast<cl_context>(ocl_ctx), properties, 0, size, nullptr, &error);
+    OPENVINO_ASSERT(error == CL_SUCCESS, "[GPU] clCreateBufferWithProperties error code: ", std::to_string(error));
+    OPENVINO_ASSERT(converted_mem != nullptr, "[GPU] Received nullptr when converting ZE buffer");
+    return converted_mem;
 }
 
 }  // namespace cldnn
