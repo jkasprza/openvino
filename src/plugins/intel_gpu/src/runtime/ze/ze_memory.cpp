@@ -41,6 +41,63 @@ std::vector<ze_event_handle_t> get_ze_events(const std::vector<event::ptr>& even
     return ze_events;
 }
 
+size_t get_element_size(const ze_image_format_layout_t& ze_layout) {
+    switch(ze_layout) {
+        case ZE_IMAGE_FORMAT_LAYOUT_8:
+            return 1;
+        case ZE_IMAGE_FORMAT_LAYOUT_16:
+        case ZE_IMAGE_FORMAT_LAYOUT_8_8:
+            return 2;
+        case ZE_IMAGE_FORMAT_LAYOUT_32:
+        case ZE_IMAGE_FORMAT_LAYOUT_16_16:
+        case ZE_IMAGE_FORMAT_LAYOUT_8_8_8_8:
+            return 4;
+        case ZE_IMAGE_FORMAT_LAYOUT_16_16_16_16:
+        case ZE_IMAGE_FORMAT_LAYOUT_32_32:
+            return 8;
+        case ZE_IMAGE_FORMAT_LAYOUT_32_32_32_32:
+            return 16;
+        default:
+            OPENVINO_THROW("[GPU] Unexpected image format layout: " + std::to_string(ze_layout));
+    }
+}
+
+std::pair<std::size_t, std::size_t> get_width_height(const layout& layout) {
+    size_t width = 0;
+    size_t height = 0;
+    switch (layout.format) {
+        case format::image_2d_weights_c1_b_fyx:
+            width = layout.batch();
+            height = layout.spatial(0) * layout.feature() * layout.spatial(1);
+            break;
+        case format::image_2d_weights_winograd_6x3_s1_fbxyb:
+            height = layout.feature();
+            width = layout.spatial(0) * layout.batch() * layout.spatial(1) * 8 / 3;
+            break;
+        case format::image_2d_weights_winograd_6x3_s1_xfbyb:
+            height = layout.feature() * layout.spatial(0) * 8 / 3;
+            width = layout.batch() * layout.spatial(1);
+            break;
+        case format::image_2d_weights_c4_fyx_b:
+            width = layout.batch();
+            height = layout.spatial(0) * layout.feature() * layout.spatial(1);
+            break;
+        case format::image_2d_rgba:
+            width = layout.spatial(0);
+            height = layout.spatial(1);
+            break;
+        case format::nv12:
+        {
+            // [NHWC] dimensions order
+            auto shape = layout.get_shape();
+            width = shape[2];
+            height = shape[1];
+            break;
+        }
+        default:
+            OPENVINO_THROW("[GPU] 2D image allocation", "unsupported image type!");
+    }
+    return {width, height};
 }  // namespace
 
 allocation_type gpu_usm::detect_allocation_type(const ze_engine* engine, const void* mem_ptr) {
@@ -113,9 +170,9 @@ void* gpu_usm::lock(const stream& stream, mem_lock_type type) {
         auto& _ze_stream = downcast<const ze_stream>(stream);
         if (get_allocation_type() == allocation_type::usm_device) {
             if (type != mem_lock_type::read) {
-                needs_write_back = true;
+                _needs_write_back = true;
             } else {
-                needs_write_back = false;
+                _needs_write_back = false;
             }
             GPU_DEBUG_LOG << "Copy usm_device buffer to host buffer." << std::endl;
             _host_buffer.allocateHost(_bytes_count);
@@ -141,7 +198,7 @@ void gpu_usm::unlock(const stream& stream) {
     _lock_count--;
     if (0 == _lock_count) {
         if (get_allocation_type() == allocation_type::usm_device) {
-            if (needs_write_back) {
+            if (_needs_write_back) {
                 auto& _ze_stream = downcast<const ze_stream>(stream);
                 OV_ZE_EXPECT(zeCommandListAppendMemoryCopy(_ze_stream.get_queue(),
                                     _buffer.get(),
@@ -284,6 +341,154 @@ shared_mem_params gpu_usm::get_internal_params() const {
         0  // plane
     };
 }
+gpu_image2d::gpu_image2d(ze_engine* engine, const layout& layout)
+    : lockable_gpu_mem()
+    , memory(engine, layout, allocation_type::ze_image, nullptr)
+    , _width(0)
+    , _height(0)
+    , _row_pitch(0)
+    , _slice_pitch(0) {
+    ze_image_desc_t image_desc = {};
+    image_desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    image_desc.pNext = nullptr;
+    image_desc.flags = ZE_IMAGE_FLAG_KERNEL_WRITE;
+    image_desc.type = ZE_IMAGE_TYPE_2D;
+    image_desc.format.layout = layout.data_type == data_types::f16 ? ZE_IMAGE_FORMAT_LAYOUT_16 : ZE_IMAGE_FORMAT_LAYOUT_32;
+    image_desc.format.type = ZE_IMAGE_FORMAT_TYPE_FLOAT;
+    image_desc.format.x = ZE_IMAGE_FORMAT_SWIZZLE_R;
+    image_desc.format.y = ZE_IMAGE_FORMAT_SWIZZLE_X;
+    image_desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_X;
+    image_desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
+    std::tie(_width, _height) = get_width_height(layout);
+    switch (layout.format) {
+        case format::image_2d_weights_c4_fyx_b:
+            if (layout.data_type == data_types::f16) {
+                image_desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_16_16_16_16;
+            } else {
+                image_desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_32_32_32_32;
+            }
+            image_desc.format.x = ZE_IMAGE_FORMAT_SWIZZLE_R;
+            image_desc.format.y = ZE_IMAGE_FORMAT_SWIZZLE_G;
+            image_desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_B;
+            image_desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_A;
+            break;
+        case format::image_2d_rgba:
+            if (layout.data_type == data_types::f16) {
+                image_desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_16_16_16_16;
+            } else {
+                image_desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_32_32_32_32;
+            }
+            image_desc.format.x = ZE_IMAGE_FORMAT_SWIZZLE_R;
+            image_desc.format.y = ZE_IMAGE_FORMAT_SWIZZLE_G;
+            image_desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_B;
+            image_desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_A;
+            image_desc.format.type = ZE_IMAGE_FORMAT_TYPE_UNORM;
+            if (layout.feature() != 3 && layout.feature() != 4) {
+                OPENVINO_THROW("[GPU] 2D image allocation", "invalid number of channels in image_2d_rgba input image (should be 3 or 4)!");
+            }
+            break;
+        case format::nv12:
+        {
+            // [NHWC] dimensions order
+            auto shape = layout.get_shape();
+            _width = shape[2];
+            _height = shape[1];
+            if (shape[3] == 2) {
+                if (layout.data_type == data_types::f16) {
+                    image_desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_16_16;
+                } else {
+                    image_desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_32_32;
+                }
+                image_desc.format.x = ZE_IMAGE_FORMAT_SWIZZLE_R;
+                image_desc.format.y = ZE_IMAGE_FORMAT_SWIZZLE_G;
+            } else if (shape[3] > 2) {
+                OPENVINO_THROW("[GPU] 2D image allocation", "invalid number of channels in NV12 input image!");
+            }
+            image_desc.format.type = ZE_IMAGE_FORMAT_TYPE_UNORM;
+            break;
+        }
+        default:
+            OPENVINO_THROW("[GPU] 2D image allocation", "unsupported image type!");
+    }
+    image_desc.width = _width;
+    image_desc.height = _height;
+    image_desc.depth = 1;
+    image_desc.arraylevels = 1;
+    image_desc.miplevels = 0;
+    ze_image_handle_t image_handle;
+    OV_ZE_EXPECT(zeImageCreate(engine->get_context(), engine->get_device(), &image_desc, &image_handle));
+    _image = std::make_shared<image_holder>(image_handle, false);
+    size_t elem_size = get_element_size(image_desc.format.layout);
+    _bytes_count = elem_size * _width * _height;
+    m_mem_tracker = std::make_shared<MemoryTracker>(engine, image_handle, layout.bytes_count(), allocation_type::ze_image);
+}
 
+gpu_image2d::gpu_image2d(ze_engine* engine, const layout& new_layout, ze_image_handle_t image, std::shared_ptr<MemoryTracker> mem_tracker)
+: lockable_gpu_mem(), memory(engine, new_layout, allocation_type::ze_image, mem_tracker),
+      _image(std::make_shared<image_holder>(image, true)) {
+    // Not sure how to get width and height from Level Zero so we will trust layout is correct
+    std::tie(_width, _height) = get_width_height(new_layout);
+}
+
+void* gpu_image2d::lock(const stream& stream, mem_lock_type type = mem_lock_type::read_write) {
+    auto& _ze_stream = downcast<const ze_stream>(stream);
+    std::lock_guard<std::mutex> locker(_mutex);
+    if (0 == _lock_count) {
+         if (type != mem_lock_type::read) {
+            _needs_write_back = true;
+        } else {
+            _needs_write_back = false;
+        }
+        _host_buffer.allocateHost(_bytes_count);
+        ze_image_region_t region;
+        region.originX = 0;
+        region.originY = 0;
+        region.originZ = 0;
+        region.width = _width;
+        region.height = _height;
+        region.depth = 1;
+        OV_ZE_EXPECT(zeCommandListAppendImageCopyToMemoryExt(_ze_stream.get_queue(),
+            _host_buffer.get(),
+            _image->get_handle(),
+            &region,
+            _row_pitch,
+            _slice_pitch,
+            nullptr,
+            0,
+            nullptr));
+        OV_ZE_EXPECT(zeCommandListHostSynchronize(_ze_stream.get_queue(), endless_wait));
+        _mapped_ptr = _host_buffer.get();
+    }
+    _lock_count++;
+    return _mapped_ptr;
+}
+void gpu_image2d::unlock(const stream& stream) {
+    std::lock_guard<std::mutex> locker(_mutex);
+    _lock_count--;
+    if (0 == _lock_count) {
+        if (_needs_write_back) {
+            ze_image_region_t region;
+            region.originX = 0;
+            region.originY = 0;
+            region.originZ = 0;
+            region.width = _width;
+            region.height = _height;
+            region.depth = 1;
+            auto& _ze_stream = downcast<const ze_stream>(stream);
+            OV_ZE_EXPECT(zeCommandListAppendImageCopyFromMemoryExt(_ze_stream.get_queue(),
+                _image->get_handle(),
+                _host_buffer.get(),
+                &region,
+                _row_pitch,
+                _slice_pitch,
+                nullptr,
+                0,
+                nullptr));
+            OV_ZE_EXPECT(zeCommandListHostSynchronize(_ze_stream.get_queue(), endless_wait));
+        }
+        _host_buffer.freeMem();
+        _mapped_ptr = nullptr;
+    }
+}
 }  // namespace ze
 }  // namespace cldnn
