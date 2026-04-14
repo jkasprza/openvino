@@ -7,6 +7,7 @@
 #include "ze_common.hpp"
 #include <ze_api.h>
 #include "intel_gpu/runtime/debug_configuration.hpp"
+#include "intel_gpu/runtime/ocl_ze_converter.hpp"
 #include "openvino/core/except.hpp"
 
 #include <vector>
@@ -104,7 +105,8 @@ std::vector<ze_device_handle_t> get_sub_devices(ze_device_handle_t root_device) 
 }
 } // namespace
 
-std::map<std::string, device::ptr> ze_device_detector::get_available_devices(void* user_context,
+std::map<std::string, device::ptr> ze_device_detector::get_available_devices(runtime_types context_type,
+                                                                             void* user_context,
                                                                              void* user_device,
                                                                              int ctx_device_id,
                                                                              int target_tile_id,
@@ -113,7 +115,20 @@ std::map<std::string, device::ptr> ze_device_detector::get_available_devices(voi
     // We must call this function before any other Level Zero API
     OV_ZE_EXPECT(zeInit(ZE_INIT_FLAG_GPU_ONLY));
     if (user_context != nullptr) {
-        devices_list = create_device_list_from_user_context(user_context, ctx_device_id);
+        if (context_type == runtime_types::ze) {
+            devices_list = create_device_list_from_user_context(user_context, ctx_device_id);
+        } else if (context_type == runtime_types::ocl) {
+            auto handles = ocl_ze_converter::get_ze_devices_from_ocl_context(user_context);
+            OPENVINO_ASSERT(handles.size() > (size_t)ctx_device_id, "[GPU] Could not find device handle for provided user context");
+            auto selected_handle = handles[ctx_device_id];
+            auto full_list = create_device_list();
+            auto selected_device = std::find_if(full_list.begin(), full_list.end(), [=](cldnn::device::ptr device){
+                auto &zero_device = downcast<const ze_device>(*device);
+                return zero_device.get_device() == selected_handle;
+            });
+            OPENVINO_ASSERT(selected_device != devices_list.end(), "[GPU] No devices found for the provided user context");
+            devices_list = {*selected_device};
+        }
     } else if (user_device != nullptr) {
         devices_list = create_device_list_from_user_device(user_device);
     } else {

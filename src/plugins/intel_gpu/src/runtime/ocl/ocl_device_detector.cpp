@@ -35,7 +35,17 @@ std::vector<std::string> split(const std::string& s, char delim) {
     return result;
 }
 
-bool does_device_match_config(const cl::Device& device) {
+}  // namespace
+
+namespace cldnn {
+namespace ocl {
+static constexpr auto INTEL_PLATFORM_VENDOR = "Intel(R) Corporation";
+#ifdef _WIN32
+static constexpr auto INTEL_D3D11_SHARING_EXT_NAME = "cl_khr_d3d11_sharing";
+#endif // _WIN32
+
+bool does_device_match_config(void * ocl_device) {
+    cl::Device device(reinterpret_cast<cl_device_id>(ocl_device));
     if (device.getInfo<CL_DEVICE_TYPE>() != CL_DEVICE_TYPE_GPU) {
         return false;
     }
@@ -68,15 +78,6 @@ bool does_device_match_config(const cl::Device& device) {
 
     return true;
 }
-
-}  // namespace
-
-namespace cldnn {
-namespace ocl {
-static constexpr auto INTEL_PLATFORM_VENDOR = "Intel(R) Corporation";
-#ifdef _WIN32
-static constexpr auto INTEL_D3D11_SHARING_EXT_NAME = "cl_khr_d3d11_sharing";
-#endif // _WIN32
 
 static std::vector<cl::Device> getSubDevices(cl::Device& rootDevice) {
     cl_uint maxSubDevices;
@@ -196,7 +197,7 @@ std::vector<device::ptr> ocl_device_detector::create_device_list() const {
             std::vector<cl::Device> devices;
             platform.getDevices(CL_DEVICE_TYPE_ALL, &devices);
             for (auto& device : devices) {
-                if (!does_device_match_config(device))
+                if (!does_device_match_config(device.get()))
                     continue;
 
                 if (device.getInfo<CL_DEVICE_VENDOR_ID>() == cldnn::INTEL_VENDOR_ID) {
@@ -221,7 +222,7 @@ std::vector<device::ptr> ocl_device_detector::create_device_list_from_user_conte
     std::vector<device::ptr> supported_devices;
     for (size_t i = 0; i < all_devices.size(); i++) {
         auto& device = all_devices[i];
-        if (!does_device_match_config(device) || static_cast<int>(i) != ctx_device_id)
+        if (!does_device_match_config(device.get()) || static_cast<int>(i) != ctx_device_id)
             continue;
         supported_devices.emplace_back(std::make_shared<ocl_device>(device, ctx, cl::Platform(device.getInfo<CL_DEVICE_PLATFORM>())));
     }
@@ -273,7 +274,7 @@ std::vector<device::ptr> ocl_device_detector::create_device_list_from_user_devic
             &devices);
 
         for (auto& device : devices) {
-            if (!does_device_match_config(device))
+            if (!does_device_match_config(device.get()))
                 continue;
 
             cl_context_properties props[] = {

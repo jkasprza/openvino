@@ -15,6 +15,8 @@
 namespace cldnn {
 namespace ocl {
 
+bool does_device_match_config(void* ocl_device);
+
 class ocl_device_detector {
 public:
     ocl_device_detector() = default;

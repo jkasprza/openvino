@@ -25,6 +25,7 @@ public:
 
     explicit device_query(engine_types engine_type,
                           runtime_types runtime_type,
+                          runtime_types context_type,
                           void* user_context = nullptr,
                           void* user_device = nullptr,
                           int ctx_device_id = 0,
@@ -32,7 +33,8 @@ public:
                           bool initialize_devices = false);
 
     /// @brief Create device query with default values for engine type and runtime type
-    explicit device_query(void* user_context = nullptr,
+    explicit device_query(runtime_types context_type,
+                          void* user_context = nullptr,
                           void* user_device = nullptr,
                           int ctx_device_id = 0,
                           int target_tile_id = -1,

@@ -17,7 +17,8 @@ class ze_device_detector {
 public:
     ze_device_detector() = default;
 
-    std::map<std::string, device::ptr> get_available_devices(void* user_context,
+    std::map<std::string, device::ptr> get_available_devices(runtime_types context_type,
+                                                             void* user_context,
                                                              void* user_device,
                                                              int ctx_device_id,
                                                              int target_tile_id,

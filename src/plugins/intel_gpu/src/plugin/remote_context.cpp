@@ -38,7 +38,7 @@ RemoteContextImpl::RemoteContextImpl(const std::string& device_name, std::vector
     if (m_rt_type == cldnn::runtime_types::ze && m_device->is_initialized()) {
         m_ze_context = m_device->get_handle(cldnn::runtime_resources::ZE_CONTEXT);
         // Find corresponding OCL device
-        cldnn::device_query device_query(cldnn::engine_types::ocl, cldnn::runtime_types::ocl);
+        cldnn::device_query device_query(cldnn::engine_types::ocl, cldnn::runtime_types::ocl, cldnn::runtime_types::ocl);
         auto available_devices = device_query.get_available_devices();
         auto match = std::find_if(available_devices.begin(), available_devices.end(), [&](const std::pair<std::string, cldnn::device::ptr>& device_pair) {
             auto ocl_device = device_pair.second;
@@ -102,10 +102,10 @@ RemoteContextImpl::RemoteContextImpl(const std::map<std::string, RemoteContextIm
     const auto initialize_devices = true;
     std::map<std::string, cldnn::device::ptr> device_map;
     if (m_rt_type == cldnn::runtime_types::ze) {
-        cldnn::device_query device_query(m_ze_context, nullptr, ctx_device_id, target_tile_id, initialize_devices);
+        cldnn::device_query device_query(cldnn::runtime_types::ocl, m_ocl_context, nullptr, ctx_device_id, target_tile_id, initialize_devices);
         device_map = device_query.get_available_devices();
     } else if (m_rt_type == cldnn::runtime_types::ocl) {
-        cldnn::device_query device_query(m_ocl_context, m_va_display, ctx_device_id, target_tile_id, initialize_devices);
+        cldnn::device_query device_query(cldnn::runtime_types::ocl, m_ocl_context, m_va_display, ctx_device_id, target_tile_id, initialize_devices);
         device_map = device_query.get_available_devices();
     }
 
@@ -288,7 +288,7 @@ void RemoteContextImpl::initialize() {
         if (m_rt_type == cldnn::runtime_types::ze) {
             m_ze_context = m_device->get_handle(cldnn::runtime_resources::ZE_CONTEXT);
             // Find corresponding OCL device
-            cldnn::device_query device_query(cldnn::engine_types::ocl, cldnn::runtime_types::ocl);
+            cldnn::device_query device_query(cldnn::engine_types::ocl, cldnn::runtime_types::ocl, cldnn::runtime_types::ocl);
             auto available_devices = device_query.get_available_devices();
             auto match = std::find_if(available_devices.begin(), available_devices.end(), [&](const std::pair<std::string, cldnn::device::ptr>& device_pair) {
                 auto ocl_device = device_pair.second;

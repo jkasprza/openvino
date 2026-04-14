@@ -3,6 +3,7 @@
 //
 
 #include "intel_gpu/runtime/ocl_ze_converter.hpp"
+#include "ocl_device_detector.hpp"
 #include "ocl_common.hpp"
 
 namespace cldnn {
@@ -12,6 +13,7 @@ static constexpr cl_uint CL_L0_CONTEXT_HANDLE = 0x10021;
 static constexpr cl_uint CL_L0_IMMEDIATE_CMD_LIST_HANDLE = 0x10022;
 //static constexpr cl_uint CL_L0_EVENT_HANDLE = 0x10023;
 static constexpr cl_uint CL_L0_MEM_OBJ_HANDLE = 0x10024;
+static constexpr cl_uint CL_L0_DEVICE_HANDLE = 0x10025;
 
 } // namespace
 
@@ -46,6 +48,31 @@ ze_handle ocl_ze_converter::convert_ocl_buffer_to_ze(ocl_handle ocl_buffer) {
     OPENVINO_ASSERT(error == CL_SUCCESS, "[GPU] clGetMemObjectInfo error code: ", std::to_string(error));
     OPENVINO_ASSERT(ze_mem != nullptr, "[GPU] Received nullptr when converting OCL buffer");
     return ze_mem;
+}
+
+ze_handle ocl_ze_converter::convert_ocl_device_to_ze(ocl_handle ocl_device) {
+    static_assert(sizeof(ocl_handle) == sizeof(cl_device_id), "[GPU] Expected ocl_handle to be same size as cl_mem");
+    cl_device_id device = reinterpret_cast<cl_device_id>(ocl_device);
+    ze_handle ze_device;
+    cl_int error = clGetDeviceInfo(device, CL_L0_DEVICE_HANDLE, sizeof(ze_handle), &ze_device, nullptr);
+    OPENVINO_ASSERT(error == CL_SUCCESS, "[GPU] clGetDeviceInfo error code: ", std::to_string(error));
+    OPENVINO_ASSERT(ze_device != nullptr, "[GPU] Received nullptr when converting OCL device");
+    return ze_device;
+}
+
+std::vector<ze_handle> ocl_ze_converter::get_ze_devices_from_ocl_context(ocl_handle ocl_ctx) {
+    cl::Context ctx = cl::Context(static_cast<cl_context>(ocl_ctx), true);
+    auto all_devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
+
+    std::vector<ze_handle> supported_devices;
+    for (size_t i = 0; i < all_devices.size(); i++) {
+        auto& device = all_devices[i];
+        if (!ocl::does_device_match_config(device.get()))
+            continue;
+
+        supported_devices.emplace_back(convert_ocl_device_to_ze(device.get()));
+    }
+    return supported_devices;
 }
 
 ocl_handle ocl_ze_converter::convert_ze_context_to_ocl(ze_handle ze_ctx, ocl_handle ocl_device) {
