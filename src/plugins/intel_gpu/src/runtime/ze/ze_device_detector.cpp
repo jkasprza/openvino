@@ -52,7 +52,7 @@ std::vector<device::ptr> create_device_list() {
 }
 
 std::vector<device::ptr> create_device_list_from_user_context(void* user_context, int ctx_device_id) {
-    // Curently there is no way to obtain device lists from Level Zero context
+    // Currently there is no way to obtain device lists from Level Zero context
     // Context is created for a specific driver and unless context was created with zeContextCreateEx then all driver devices are visible in the context
     // Work around is to try and create memory with provied context for each device and only consider successfull devices
     ze_context_handle_t ze_context = reinterpret_cast<ze_context_handle_t>(user_context);

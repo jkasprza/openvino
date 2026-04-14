@@ -34,6 +34,8 @@ public:
 
     ~ze_stream();
 
+    const ze_engine& get_engine() const { return _engine; }
+
     void flush() const override;
     void finish() const override;
     void wait() override;
