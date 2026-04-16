@@ -234,7 +234,7 @@ Plugin::Plugin() {
     set_device_name("GPU");
     register_primitives();
 
-    cldnn::device_query device_query(cldnn::runtime_types::ocl);
+    cldnn::device_query device_query;
     m_device_map = device_query.get_available_devices();
 
     // Set default configs for each device

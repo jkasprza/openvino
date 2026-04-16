@@ -3,6 +3,7 @@
 //
 
 #include "intel_gpu/runtime/utils.hpp"
+#include "intel_gpu/runtime/ocl_ze_converter.hpp"
 #include "ze_memory.hpp"
 #include "ze/ze_common.hpp"
 #include "ze_engine.hpp"
@@ -99,6 +100,23 @@ std::pair<std::size_t, std::size_t> get_width_height(const layout& layout) {
     }
     return {width, height};
 }
+
+UsmMemory convert_buffer_to_usm(ze_engine* engine, void *ocl_handle) {
+    auto usm_ptr = ocl_ze_converter::get_ze_mem_from_cl_mem(ocl_handle);
+    return UsmMemory(engine->get_context(), engine->get_device(), usm_ptr, 0);
+}
+
+ze_image_handle_t convert_image_to_ze(void *ocl_image) {
+    auto ze_image = ocl_ze_converter::get_ze_mem_from_cl_mem(ocl_image);
+    return reinterpret_cast<ze_image_handle_t>(ze_image);
+}
+
+bool check_usm_size(ze_context_handle_t context, void *ptr, size_t min_size) {
+    size_t actual_mem_size = 0;
+    OV_ZE_EXPECT(zeMemGetAddressRange(context, ptr, nullptr, &actual_mem_size));
+    return actual_mem_size >= min_size;
+}
+
 }  // namespace
 
 allocation_type gpu_usm::detect_allocation_type(const ze_engine* engine, const void* mem_ptr) {
@@ -129,6 +147,8 @@ gpu_usm::gpu_usm(ze_engine* engine, const layout& new_layout, const ze::UsmMemor
     , memory(engine, new_layout, type, mem_tracker)
     , _buffer(buffer)
     , _host_buffer(engine->get_context(), engine->get_device()) {
+    size_t min_size = new_layout.bytes_count();
+    OPENVINO_ASSERT(check_usm_size(engine->get_context(), buffer.get(), min_size), "[GPU] Memory size is smaller than expected");
 }
 
 gpu_usm::gpu_usm(ze_engine* engine, const layout& new_layout, const ze::UsmMemory& buffer, std::shared_ptr<MemoryTracker> mem_tracker)
@@ -136,6 +156,8 @@ gpu_usm::gpu_usm(ze_engine* engine, const layout& new_layout, const ze::UsmMemor
     , memory(engine, new_layout, detect_allocation_type(engine, buffer), mem_tracker)
     , _buffer(buffer)
     , _host_buffer(engine->get_context(), engine->get_device()) {
+    size_t min_size = new_layout.bytes_count();
+    OPENVINO_ASSERT(check_usm_size(engine->get_context(), buffer.get(), min_size), "[GPU] Memory size is smaller than expected");
 }
 
 gpu_usm::gpu_usm(ze_engine* engine, const layout& layout, allocation_type type)
@@ -325,11 +347,13 @@ dnnl::memory gpu_usm::get_onednn_memory(dnnl::memory::desc desc, int64_t offset)
 
 shared_mem_params gpu_usm::get_internal_params() const {
     auto casted = downcast<ze_engine>(_engine);
+    auto ocl_ctx = casted->get_handle(runtime_resources::OCL_CONTEXT);
+    auto mem_handle = static_cast<shared_handle>(_buffer.get());
     return {
-        shared_mem_type::shared_mem_usm,  // shared_mem_type
-        static_cast<shared_handle>(casted->get_context()),  // context handle
-        static_cast<shared_handle>(casted->get_device()),  // user_device handle
-        static_cast<shared_handle>(_buffer.get()),  // mem handle
+        shared_mem_type::shared_mem_usm,
+        ocl_ctx,
+        nullptr,
+        mem_handle,
 #ifdef _WIN32
         nullptr,  // surface handle
 #else
@@ -416,15 +440,19 @@ gpu_image2d::gpu_image2d(ze_engine* engine, const layout& layout)
     ze_image_handle_t image_handle;
     OV_ZE_EXPECT(zeImageCreate(engine->get_context(), engine->get_device(), &image_desc, &image_handle));
     _image = std::make_shared<image_holder>(image_handle, false);
+    auto zero_engine = downcast<const ze_engine>(_engine);
+    auto ocl_ctx = zero_engine->get_handle(runtime_resources::OCL_CONTEXT);
+    _ocl_handle = ocl_ze_converter::create_cl_image_from_ze_image(ocl_ctx, image_handle, layout);
     size_t elem_size = get_element_size(image_desc.format.layout);
     _bytes_count = elem_size * _width * _height;
     m_mem_tracker = std::make_shared<MemoryTracker>(engine, image_handle, layout.bytes_count(), allocation_type::ze_image);
 }
 
-gpu_image2d::gpu_image2d(ze_engine* engine, const layout& new_layout, ze_image_handle_t image, std::shared_ptr<MemoryTracker> mem_tracker)
+gpu_image2d::gpu_image2d(ze_engine* engine, const layout& new_layout, void *ocl_image, std::shared_ptr<MemoryTracker> mem_tracker)
     : lockable_gpu_mem()
     , memory(engine, new_layout, allocation_type::ze_image, mem_tracker)
-    , _image(std::make_shared<image_holder>(image, true))
+    , _ocl_handle(ocl_image)
+    , _image(std::make_shared<image_holder>(convert_image_to_ze(ocl_image), true))
     , _host_buffer(engine->get_context(), engine->get_device())
     , _fill_buffer(engine->get_context(), engine->get_device()) {
     // No way to get width and height from Level Zero so we have to assume layout is correct
@@ -520,8 +548,8 @@ event::ptr gpu_image2d::fill(stream& stream, unsigned char pattern, const std::v
 
 shared_mem_params gpu_image2d::get_internal_params() const {
     auto zero_engine = downcast<const ze_engine>(_engine);
-    return {shared_mem_type::shared_mem_image, static_cast<shared_handle>(zero_engine->get_context()), nullptr,
-            static_cast<shared_handle>(_image->get_handle()),
+    auto ocl_ctx = zero_engine->get_handle(runtime_resources::OCL_CONTEXT);
+    return {shared_mem_type::shared_mem_image, ocl_ctx, nullptr, _ocl_handle,
 #ifdef _WIN32
         nullptr,
 #else
@@ -601,6 +629,29 @@ event::ptr gpu_image2d::copy_to(stream& stream, void* data_ptr, size_t src_offse
         result_event->wait();
     }
     return result_event;
+}
+
+ocl_buffer::ocl_buffer(ze_engine* engine, const layout& new_layout, void *ocl_buffer, std::shared_ptr<MemoryTracker> mem_tracker)
+    : gpu_usm(engine, new_layout, convert_buffer_to_usm(engine, ocl_buffer), mem_tracker)
+    , _ocl_handle(ocl_buffer) {}
+ocl_buffer::ocl_buffer(ze_engine* engine, const layout& layout)
+    : gpu_usm(engine, layout, allocation_type::usm_device)
+    , _ocl_handle(nullptr) {
+        auto zero_engine = downcast<const ze_engine>(_engine);
+        auto ocl_ctx = zero_engine->get_handle(runtime_resources::OCL_CONTEXT);
+        _ocl_handle = ocl_ze_converter::create_cl_buffer_from_ze_usm(ocl_ctx, buffer_ptr());
+}
+
+shared_mem_params ocl_buffer::get_internal_params() const {
+    auto zero_engine = downcast<const ze_engine>(_engine);
+    auto ocl_ctx = zero_engine->get_handle(runtime_resources::OCL_CONTEXT);
+    return {shared_mem_type::shared_mem_buffer, ocl_ctx, nullptr, _ocl_handle,
+#ifdef _WIN32
+        nullptr,
+#else
+        0,
+#endif
+        0};
 }
 
 

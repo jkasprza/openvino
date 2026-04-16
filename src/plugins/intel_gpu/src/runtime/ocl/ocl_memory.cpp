@@ -50,6 +50,80 @@ static int get_cl_map_type(mem_lock_type type) {
     }
 }
 
+cl_image_format get_cl_image_format(const layout &layout) {
+    cl_image_format image_format{};
+    cl_channel_type &type = image_format.image_channel_data_type;
+    cl_channel_order &order = image_format.image_channel_order;
+    type = layout.data_type == data_types::f16 ? CL_HALF_FLOAT : CL_FLOAT;
+    order = CL_R;
+    switch (layout.format) {
+        case format::image_2d_weights_c4_fyx_b:
+            order = CL_RGBA;
+            break;
+        case format::image_2d_rgba:
+            order = CL_RGBA;
+            if (layout.feature() != 3 && layout.feature() != 4) {
+                CLDNN_ERROR_MESSAGE("2D image allocation", "invalid number of channels in image_2d_rgba input image (should be 3 or 4)!");
+            }
+            type = CL_UNORM_INT8;
+            break;
+        case format::nv12:
+        {
+            // [NHWC] dimensions order
+            auto shape = layout.get_shape();
+            if (shape[3] == 2) {
+                order = CL_RG;
+            } else if (shape[3] > 2) {
+                CLDNN_ERROR_MESSAGE("2D image allocation", "invalid number of channels in NV12 input image!");
+            }
+            type = CL_UNORM_INT8;
+            break;
+        }
+        default:
+            OPENVINO_THROW("[GPU] Unexpected layout format");
+    }
+    return image_format;
+}
+
+cl_image_desc get_cl_image_desc(const layout &layout) {
+    cl_image_desc image_desc{CL_MEM_OBJECT_IMAGE2D, 0, 0, 0, 0, 0, 0, 0, 0, nullptr};
+    auto &width = image_desc.image_width;
+    auto &height = image_desc.image_height;
+    switch (layout.format) {
+        case format::image_2d_weights_c1_b_fyx:
+            width = layout.batch();
+            height = layout.spatial(0) * layout.feature() * layout.spatial(1);
+            break;
+        case format::image_2d_weights_winograd_6x3_s1_fbxyb:
+            height = layout.feature();
+            width = layout.spatial(0) * layout.batch() * layout.spatial(1) * 8 / 3;
+            break;
+        case format::image_2d_weights_winograd_6x3_s1_xfbyb:
+            height = layout.feature() * layout.spatial(0) * 8 / 3;
+            width = layout.batch() * layout.spatial(1);
+            break;
+        case format::image_2d_weights_c4_fyx_b:
+            width = layout.batch();
+            height = layout.spatial(0) * layout.feature() * layout.spatial(1);
+            break;
+        case format::image_2d_rgba:
+            width = layout.spatial(0);
+            height = layout.spatial(1);
+            break;
+        case format::nv12:
+        {
+            // [NHWC] dimensions order
+            auto shape = layout.get_shape();
+            width = shape[2];
+            height = shape[1];
+            break;
+        }
+        default:
+            OPENVINO_THROW("[GPU] Unexpected layout format");
+    }
+    return image_desc;
+}
+
 gpu_buffer::gpu_buffer(ocl_engine* engine,
                        const layout& layout)
     : lockable_gpu_mem(), memory(engine, layout, allocation_type::cl_mem, nullptr)
@@ -222,55 +296,19 @@ gpu_image2d::gpu_image2d(ocl_engine* engine, const layout& layout)
     , _height(0)
     , _row_pitch(0)
     , _slice_pitch(0) {
-    cl_channel_type type = layout.data_type == data_types::f16 ? CL_HALF_FLOAT : CL_FLOAT;
-    cl_channel_order order = CL_R;
-    switch (layout.format) {
-        case format::image_2d_weights_c1_b_fyx:
-            _width = layout.batch();
-            _height = layout.spatial(0) * layout.feature() * layout.spatial(1);
-            break;
-        case format::image_2d_weights_winograd_6x3_s1_fbxyb:
-            _height = layout.feature();
-            _width = layout.spatial(0) * layout.batch() * layout.spatial(1) * 8 / 3;
-            break;
-        case format::image_2d_weights_winograd_6x3_s1_xfbyb:
-            _height = layout.feature() * layout.spatial(0) * 8 / 3;
-            _width = layout.batch() * layout.spatial(1);
-            break;
-        case format::image_2d_weights_c4_fyx_b:
-            _width = layout.batch();
-            _height = layout.spatial(0) * layout.feature() * layout.spatial(1);
-            order = CL_RGBA;
-            break;
-        case format::image_2d_rgba:
-            _width = layout.spatial(0);
-            _height = layout.spatial(1);
-            order = CL_RGBA;
-            if (layout.feature() != 3 && layout.feature() != 4) {
-                CLDNN_ERROR_MESSAGE("2D image allocation", "invalid number of channels in image_2d_rgba input image (should be 3 or 4)!");
-            }
-            type = CL_UNORM_INT8;
-            break;
-        case format::nv12:
-        {
-            // [NHWC] dimensions order
-            auto shape = layout.get_shape();
-            _width = shape[2];
-            _height = shape[1];
-            if (shape[3] == 2) {
-                order = CL_RG;
-            } else if (shape[3] > 2) {
-                CLDNN_ERROR_MESSAGE("2D image allocation", "invalid number of channels in NV12 input image!");
-            }
-            type = CL_UNORM_INT8;
-            break;
-        }
-        default:
-            CLDNN_ERROR_MESSAGE("2D image allocation", "unsupported image type!");
+    if (layout.format == format::image_2d_rgba && layout.feature() != 3 && layout.feature() != 4) {
+        CLDNN_ERROR_MESSAGE("2D image allocation", "invalid number of channels in image_2d_rgba input image (should be 3 or 4)!");
     }
-
-    cl::ImageFormat imageFormat(order, type);
-    _buffer = cl::Image2D(engine->get_cl_context(), CL_MEM_READ_WRITE, imageFormat, _width, _height, 0);
+    if (layout.format == format::nv12) {
+        auto shape = layout.get_shape();
+        if (shape[3] > 2) {
+            CLDNN_ERROR_MESSAGE("2D image allocation", "invalid number of channels in NV12 input image!");
+        }
+    }
+    auto tmp_format = get_cl_image_format(layout);
+    cl::ImageFormat imageFormat(tmp_format.image_channel_order, tmp_format.image_channel_data_type);
+    auto desc = get_cl_image_desc(layout);
+    _buffer = cl::Image2D(engine->get_cl_context(), CL_MEM_READ_WRITE, imageFormat, desc.image_width, desc.image_height, desc.image_row_pitch);
     size_t elem_size = _buffer.getImageInfo<CL_IMAGE_ELEMENT_SIZE>();
     _bytes_count = elem_size * _width * _height;
     m_mem_tracker = std::make_shared<MemoryTracker>(engine, _buffer.get(), layout.bytes_count(), allocation_type::cl_mem);

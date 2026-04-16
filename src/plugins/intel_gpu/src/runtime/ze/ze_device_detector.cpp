@@ -39,7 +39,7 @@ std::vector<device::ptr> create_device_list() {
                 OV_ZE_EXPECT(zeDeviceGetProperties(all_devices[d], &device_properties));
 
                 if (ZE_DEVICE_TYPE_GPU == device_properties.type) {
-                    ret.emplace_back(std::make_shared<ze_device>(all_drivers[i], all_devices[d], initialize_devices));
+                    ret.emplace_back(std::make_shared<ze_device>(all_drivers[i], all_devices[d], nullptr, initialize_devices));
                 }
             } catch (std::exception& ex) {
                 GPU_DEBUG_LOG << "Devices query/creation failed for driver " << i << ex.what() << std::endl;
@@ -53,38 +53,7 @@ std::vector<device::ptr> create_device_list() {
 }
 
 std::vector<device::ptr> create_device_list_from_user_context(void* user_context, int ctx_device_id) {
-    // Currently there is no way to obtain device lists from Level Zero context
-    // Context is created for a specific driver and unless context was created with zeContextCreateEx then all driver devices are visible in the context
-    // Work around is to try and create memory with provied context for each device and only consider successfull devices
-    ze_context_handle_t ze_context = reinterpret_cast<ze_context_handle_t>(user_context);
-    OPENVINO_ASSERT(zeContextGetStatus(ze_context) == ZE_RESULT_SUCCESS, "[GPU] User provided context is not in valid state");
-    OPENVINO_ASSERT(ctx_device_id >= 0, "[GPU] Expected user provided device id to be non-negative. But got: ", ctx_device_id);
-
-    auto check_mem_alloc = [](ze_context_handle_t context, ze_device_handle_t device) {
-        constexpr size_t alloc_size = 64 * sizeof(float);
-        void *memory = nullptr;
-        ze_device_mem_alloc_desc_t device_desc{ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC , nullptr, 0, 0};
-        ze_result_t res = zeMemAllocDevice(context, &device_desc, alloc_size, sizeof(float), device, &memory);
-        if (res == ZE_RESULT_SUCCESS) {
-            OV_ZE_WARN(zeMemFree(context, memory));
-            return true;
-        }
-        return false;
-    };
-
-    auto all_devices = create_device_list();
-    std::vector<device::ptr> context_devices;
-    int devices_to_skip = ctx_device_id;
-    for (auto& device : all_devices) {
-        ze_device_handle_t ze_device_handle = std::dynamic_pointer_cast<ze_device>(device)->get_device();
-        
-        if (check_mem_alloc(ze_context, ze_device_handle) && devices_to_skip-- == 0) {
-            context_devices.push_back(device);
-            break; // We expect only one device
-        }
-    }
-    OPENVINO_ASSERT(!context_devices.empty(), "[GPU] No devices found for the provided user context");
-    return context_devices;
+    OPENVINO_NOT_IMPLEMENTED;
 }
 
 std::vector<device::ptr> create_device_list_from_user_device(void* user_device) {
@@ -105,8 +74,7 @@ std::vector<ze_device_handle_t> get_sub_devices(ze_device_handle_t root_device) 
 }
 } // namespace
 
-std::map<std::string, device::ptr> ze_device_detector::get_available_devices(runtime_types context_type,
-                                                                             void* user_context,
+std::map<std::string, device::ptr> ze_device_detector::get_available_devices(void* user_context,
                                                                              void* user_device,
                                                                              int ctx_device_id,
                                                                              int target_tile_id,
@@ -115,20 +83,7 @@ std::map<std::string, device::ptr> ze_device_detector::get_available_devices(run
     // We must call this function before any other Level Zero API
     OV_ZE_EXPECT(zeInit(ZE_INIT_FLAG_GPU_ONLY));
     if (user_context != nullptr) {
-        if (context_type == runtime_types::ze) {
-            devices_list = create_device_list_from_user_context(user_context, ctx_device_id);
-        } else if (context_type == runtime_types::ocl) {
-            auto handles = ocl_ze_converter::get_ze_devices_from_ocl_context(user_context);
-            OPENVINO_ASSERT(handles.size() > (size_t)ctx_device_id, "[GPU] Could not find device handle for provided user context");
-            auto selected_handle = handles[ctx_device_id];
-            auto full_list = create_device_list();
-            auto selected_device = std::find_if(full_list.begin(), full_list.end(), [=](cldnn::device::ptr device){
-                auto &zero_device = downcast<const ze_device>(*device);
-                return zero_device.get_device() == selected_handle;
-            });
-            OPENVINO_ASSERT(selected_device != devices_list.end(), "[GPU] No devices found for the provided user context");
-            devices_list = {*selected_device};
-        }
+        devices_list = create_device_list_from_user_context(user_context, ctx_device_id);
     } else if (user_device != nullptr) {
         devices_list = create_device_list_from_user_device(user_device);
     } else {
@@ -153,7 +108,7 @@ std::map<std::string, device::ptr> ze_device_detector::get_available_devices(run
                 sub_idx++;
                 continue;
             }
-            auto sub_device_ptr = std::make_shared<ze_device>(root_device->get_driver(), sub_device, initialize_devices);
+            auto sub_device_ptr = std::make_shared<ze_device>(root_device->get_driver(), sub_device, nullptr, initialize_devices);
             ret[map_id + "." + std::to_string(sub_idx++)] = sub_device_ptr;
         }
     }

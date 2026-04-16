@@ -435,7 +435,7 @@ ocl_device::ocl_device(const ocl_device::ptr other, bool initialize_ctx)
 }
 
 bool ocl_device::is_same(const device::ptr other) {
-    auto casted = downcast<ocl_device>(other.get());
+    auto casted = dynamic_cast<ocl_device*>(other.get());
     if (!casted)
         return false;
 

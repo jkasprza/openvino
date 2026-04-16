@@ -16,6 +16,8 @@
 
 namespace cldnn {
 namespace ocl {
+cl_image_format get_cl_image_format(const layout &layout);
+cl_image_desc get_cl_image_desc(const layout &layout);
 struct lockable_gpu_mem {
     lockable_gpu_mem() :
         _lock_count(0),

@@ -152,6 +152,8 @@ public:
 
     bool get_enable_large_allocations() const;
 
+    virtual rt_handle get_handle(runtime_resources resource) const = 0;
+
 #ifdef ENABLE_ONEDNN_FOR_GPU
     /// Creates onednn engine object which shares device and context with current engine
     virtual void create_onednn_engine(const ExecutionConfig& config) = 0;
@@ -175,7 +177,7 @@ public:
 protected:
     /// Create engine for given @p device
     engine(const device::ptr device);
-    const device::ptr _device;
+    device::ptr _device;
     bool enable_large_allocations = false;
     std::unique_ptr<stream> _service_stream;
 

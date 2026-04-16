@@ -99,9 +99,7 @@ private:
     std::shared_ptr<cldnn::device> m_device;
     std::shared_ptr<cldnn::engine> m_engine;
     ov::intel_gpu::gpu_handle_param m_va_display = nullptr;
-    ov::intel_gpu::gpu_handle_param m_ocl_context = nullptr;
     ov::intel_gpu::gpu_handle_param m_ocl_queue = nullptr;
-    ov::intel_gpu::gpu_handle_param m_ze_context = nullptr;
     ov::intel_gpu::gpu_handle_param m_ze_cmd_list = nullptr;
 
     ContextType m_type = ContextType::OCL;

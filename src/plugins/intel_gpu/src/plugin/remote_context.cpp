@@ -35,31 +35,13 @@ RemoteContextImpl::RemoteContextImpl(const std::string& device_name, std::vector
     OPENVINO_ASSERT(m_rt_type == cldnn::runtime_types::ocl || m_rt_type == cldnn::runtime_types::ze,
                 "[GPU] Expected OCL or L0 runtime type");
 
-    if (m_rt_type == cldnn::runtime_types::ze && m_device->is_initialized()) {
-        m_ze_context = m_device->get_handle(cldnn::runtime_resources::ZE_CONTEXT);
-        // Find corresponding OCL device
-        cldnn::device_query device_query(cldnn::engine_types::ocl, cldnn::runtime_types::ocl, cldnn::runtime_types::ocl);
-        auto available_devices = device_query.get_available_devices();
-        auto match = std::find_if(available_devices.begin(), available_devices.end(), [&](const std::pair<std::string, cldnn::device::ptr>& device_pair) {
-            auto ocl_device = device_pair.second;
-            return ocl_device->get_info().uuid.uuid == m_device->get_info().uuid.uuid;
-        });
-        if (match != available_devices.end()) {
-            auto ocl_device_handle = match->second->get_handle(cldnn::runtime_resources::OCL_DEVICE);
-            m_ocl_context = cldnn::ocl_ze_converter::convert_ze_context_to_ocl(m_ze_context, ocl_device_handle);
-        } else {
-            OPENVINO_THROW("[GPU] No matching OCL device found for ZE device in context initialization");
-        }
-    } else if (m_rt_type == cldnn::runtime_types::ocl && m_device->is_initialized()) {
-        m_ocl_context = m_device->get_handle(cldnn::runtime_resources::OCL_CONTEXT);
-    }
-
     if (initialize_ctx) {
         initialize();
     }
 }
 
 RemoteContextImpl::RemoteContextImpl(const std::map<std::string, RemoteContextImpl::Ptr>& known_contexts, const AnyMap& params) {
+    gpu_handle_param ocl_context = nullptr;
     int ctx_device_id = 0;
     int target_tile_id = -1;
     m_rt_type = cldnn::device_query::get_default_runtime_type();
@@ -70,8 +52,8 @@ RemoteContextImpl::RemoteContextImpl(const std::map<std::string, RemoteContextIm
         auto ctx_type = extract_object(params, ov::intel_gpu::context_type);
 
         if (ctx_type == ov::intel_gpu::ContextType::OCL) {
-            m_ocl_context = extract_object(params, ov::intel_gpu::ocl_context);
-            OPENVINO_ASSERT(m_ocl_context != nullptr, "[GPU] Can't create shared OCL context as user handle is nullptr! Params:\n", params);
+            ocl_context  = extract_object(params, ov::intel_gpu::ocl_context);
+            OPENVINO_ASSERT(ocl_context != nullptr, "[GPU] Can't create shared OCL context as user handle is nullptr! Params:\n", params);
 
             if (params.find(ov::intel_gpu::ocl_queue.name()) != params.end()) {
                 m_ocl_queue = extract_object(params, ov::intel_gpu::ocl_queue);
@@ -79,13 +61,6 @@ RemoteContextImpl::RemoteContextImpl(const std::map<std::string, RemoteContextIm
 
             if (params.find(ov::intel_gpu::ocl_context_device_id.name()) != params.end())
                 ctx_device_id = extract_object(params, ov::intel_gpu::ocl_context_device_id);
-            if (m_rt_type == cldnn::runtime_types::ze) {
-                if (m_ocl_queue != nullptr) {
-                    m_ze_cmd_list = cldnn::ocl_ze_converter::convert_ocl_queue_to_ze(m_ocl_queue);
-                }
-                m_ze_context = cldnn::ocl_ze_converter::convert_ocl_context_to_ze(m_ocl_context);
-                m_type = ContextType::OCL;
-            }
         } else if (ctx_type == ov::intel_gpu::ContextType::VA_SHARED) {
             m_va_display = extract_object(params, ov::intel_gpu::va_device);
             OPENVINO_ASSERT(m_rt_type == cldnn::runtime_types::ocl, "[GPU] Expected OCL runtime type for VA_SHARED context");
@@ -98,16 +73,14 @@ RemoteContextImpl::RemoteContextImpl(const std::map<std::string, RemoteContextIm
             target_tile_id = extract_object(params, ov::intel_gpu::tile_id);
         }
     }
-
+    if (m_rt_type == cldnn::runtime_types::ze && m_ocl_queue != nullptr) {
+        m_ze_cmd_list = cldnn::ocl_ze_converter::get_ze_cmd_list_from_cl_queue(m_ocl_queue);
+    }
     const auto initialize_devices = true;
     std::map<std::string, cldnn::device::ptr> device_map;
-    if (m_rt_type == cldnn::runtime_types::ze) {
-        cldnn::device_query device_query(cldnn::runtime_types::ocl, m_ocl_context, nullptr, ctx_device_id, target_tile_id, initialize_devices);
-        device_map = device_query.get_available_devices();
-    } else if (m_rt_type == cldnn::runtime_types::ocl) {
-        cldnn::device_query device_query(cldnn::runtime_types::ocl, m_ocl_context, m_va_display, ctx_device_id, target_tile_id, initialize_devices);
-        device_map = device_query.get_available_devices();
-    }
+    // Always use ocl path for device query
+    cldnn::device_query device_query(cldnn::engine_types::ocl, cldnn::runtime_types::ocl, ocl_context, m_va_display, ctx_device_id, target_tile_id, initialize_devices);
+    device_map = device_query.get_available_devices();
 
     OPENVINO_ASSERT(device_map.size() == 1, "[GPU] Exactly one device expected in case of context sharing, but ", device_map.size(), " found");
 
@@ -128,14 +101,14 @@ const cldnn::engine& RemoteContextImpl::get_engine() const {
 }
 
 void RemoteContextImpl::init_properties() {
-    properties = { ov::intel_gpu::ocl_context(m_ocl_context) };
+    auto ocl_context =m_engine->get_handle(cldnn::runtime_resources::OCL_CONTEXT);
+    properties = { ov::intel_gpu::ocl_context(ocl_context) };
 
     switch (m_type) {
     case ContextType::OCL:
         properties.insert(ov::intel_gpu::context_type(ov::intel_gpu::ContextType::OCL));
         properties.insert(ov::intel_gpu::ocl_queue(m_ocl_queue));
         properties.insert(ov::intel_gpu::ze_cmd_list(m_ze_cmd_list));
-        properties.insert(ov::intel_gpu::ze_context(m_ze_context));
         break;
     case ContextType::VA_SHARED:
         properties.insert(ov::intel_gpu::context_type(ov::intel_gpu::ContextType::VA_SHARED));
@@ -224,7 +197,7 @@ std::string RemoteContextImpl::get_device_name(const std::map<std::string, Remot
                                                const cldnn::device::ptr current_device) const {
     std::string device_name = "GPU";
     for (auto& c : known_contexts) {
-        if (c.second->m_device->is_same(current_device)) {
+        if (c.second->m_device->get_info().uuid.uuid == current_device->get_info().uuid.uuid) {
             device_name = c.second->get_device_name();
             break;
         }
@@ -285,24 +258,7 @@ void RemoteContextImpl::initialize() {
         GPU_DEBUG_INFO << "Initialize RemoteContext for " << m_device_name << " (" << m_device->get_info().dev_name << ")" << std::endl;
 
         m_device->initialize();  // Initialize associated device before use
-        if (m_rt_type == cldnn::runtime_types::ze) {
-            m_ze_context = m_device->get_handle(cldnn::runtime_resources::ZE_CONTEXT);
-            // Find corresponding OCL device
-            cldnn::device_query device_query(cldnn::engine_types::ocl, cldnn::runtime_types::ocl, cldnn::runtime_types::ocl);
-            auto available_devices = device_query.get_available_devices();
-            auto match = std::find_if(available_devices.begin(), available_devices.end(), [&](const std::pair<std::string, cldnn::device::ptr>& device_pair) {
-                auto ocl_device = device_pair.second;
-                return ocl_device->get_info().uuid.uuid == m_device->get_info().uuid.uuid;
-            });
-            if (match != available_devices.end()) {
-                auto ocl_device_handle = match->second->get_handle(cldnn::runtime_resources::OCL_DEVICE);
-                m_ocl_context = cldnn::ocl_ze_converter::convert_ze_context_to_ocl(m_ze_context, ocl_device_handle);
-            } else {
-                OPENVINO_THROW("[GPU] No matching OCL device found for ZE device in context initialization");
-            }
-        } else if (m_rt_type == cldnn::runtime_types::ocl) {
-            m_ocl_context = m_device->get_handle(cldnn::runtime_resources::OCL_CONTEXT);
-        }
+       // Level Zero engine can accept L0 and OCL device
         m_engine = cldnn::engine::create(
             cldnn::device_query::get_default_engine_type(), cldnn::device_query::get_default_runtime_type(), m_device);
 

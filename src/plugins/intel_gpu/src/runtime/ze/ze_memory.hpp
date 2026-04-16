@@ -168,7 +168,7 @@ protected:
 };
 
 struct gpu_image2d : public lockable_gpu_mem, public memory {
-    gpu_image2d(ze_engine* engine, const layout& new_layout, ze_image_handle_t image, std::shared_ptr<MemoryTracker> mem_tracker);
+    gpu_image2d(ze_engine* engine, const layout& new_layout, void* ocl_image, std::shared_ptr<MemoryTracker> mem_tracker);
     gpu_image2d(ze_engine* engine, const layout& layout);
 
     void* lock(const stream& stream, mem_lock_type type = mem_lock_type::read_write) override;
@@ -183,13 +183,23 @@ struct gpu_image2d : public lockable_gpu_mem, public memory {
     event::ptr copy_from(stream& stream, const void* data_ptr, size_t src_offset = 0, size_t dst_offset = 0, size_t size = 0, bool blocking = true) override;
     event::ptr copy_from(stream& stream, const memory& src_mem, size_t src_offset = 0, size_t dst_offset = 0, size_t size = 0, bool blocking = true) override;
     event::ptr copy_to(stream& stream, void* data_ptr, size_t src_offset = 0, size_t dst_offset = 0, size_t size = 0, bool blocking = true) const override;
+    void * get_ocl_handle() const { return _ocl_handle; }
 
 protected:
+    void *_ocl_handle;
     std::shared_ptr<image_holder> _image;
     ze::UsmMemory _host_buffer;
     ze::UsmMemory _fill_buffer;
     size_t _width;
     size_t _height;
+};
+struct ocl_buffer : public gpu_usm {
+    ocl_buffer(ze_engine* engine, const layout& new_layout, void *ocl_buffer, std::shared_ptr<MemoryTracker> mem_tracker);
+    ocl_buffer(ze_engine* engine, const layout& layout);
+    shared_mem_params get_internal_params() const override;
+    void * get_ocl_handle() const { return _ocl_handle; }
+private:
+    void *_ocl_handle;
 };
 
 }  // namespace ze

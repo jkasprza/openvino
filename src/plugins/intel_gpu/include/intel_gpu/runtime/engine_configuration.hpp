@@ -45,10 +45,16 @@ inline std::ostream& operator<<(std::ostream& os, const runtime_types& type) {
 using rt_handle = void*;
 /// @brief Defines runtime resources
 enum class runtime_resources : int32_t {
+    OCL_START,
     OCL_CONTEXT,
     OCL_DEVICE,
+    OCL_END,
+    ZE_START,
     ZE_CONTEXT,
     ZE_DEVICE,
+    ZE_END,
 };
+
+runtime_types get_resource_rt_type(runtime_resources resource);
 
 }  // namespace cldnn

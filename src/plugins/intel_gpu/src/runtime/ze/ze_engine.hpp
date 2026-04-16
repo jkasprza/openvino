@@ -26,6 +26,16 @@ public:
     memory_ptr create_subbuffer(const memory& memory, const layout& new_layout, size_t byte_offset) override;
     memory_ptr reinterpret_buffer(const memory& memory, const layout& new_layout) override;
     bool is_the_same_buffer(const memory& mem1, const memory& mem2) override;
+    rt_handle get_handle(runtime_resources resource) const override {
+        auto rt = get_resource_rt_type(resource);
+        if (rt == runtime_types::ze) {
+            return _device->get_handle(resource);
+        } else if (rt == runtime_types::ocl) {
+            return _ocl_device->get_handle(resource);
+        } else {
+            OPENVINO_THROW("[GPU] Unsupported resource type requested from ze_engine");
+        }
+    }
 
     void* get_user_context() const override;
 
@@ -46,6 +56,8 @@ public:
 #endif
 
     static std::shared_ptr<cldnn::engine> create(const device::ptr device, runtime_types runtime_type);
+private:
+    device::ptr _ocl_device;
 };
 
 }  // namespace ze

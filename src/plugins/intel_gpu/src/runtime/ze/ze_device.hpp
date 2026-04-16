@@ -12,7 +12,8 @@ namespace ze {
 
 struct ze_device : public device {
 public:
-    ze_device(ze_driver_handle_t driver, ze_device_handle_t device, bool initialize = true);
+    using ptr = std::shared_ptr<ze_device>;
+    ze_device(ze_driver_handle_t driver, ze_device_handle_t device, ze_context_handle_t context = nullptr, bool initialize = true);
     ze_device(const ze_device &other) = delete;
     ze_device& operator=(const ze_device &other) = delete;
 
@@ -47,6 +48,7 @@ private:
     ze_device_handle_t _device = nullptr;
     ze_context_handle_t _context = nullptr;
     bool _is_initialized = false;
+    bool _is_context_shared = false;
 
     device_info _info;
     memory_capabilities _mem_caps;

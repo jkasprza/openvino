@@ -3,7 +3,7 @@
 //
 
 #include "intel_gpu/runtime/ocl_ze_converter.hpp"
-#include "ocl_device_detector.hpp"
+#include "ocl_memory.hpp"
 #include "ocl_common.hpp"
 
 namespace cldnn {
@@ -17,7 +17,7 @@ static constexpr cl_uint CL_L0_DEVICE_HANDLE = 0x10025;
 
 } // namespace
 
-ze_handle ocl_ze_converter::convert_ocl_context_to_ze(ocl_handle ocl_ctx) {
+ze_handle ocl_ze_converter::get_ze_context_from_cl_context(ocl_handle ocl_ctx) {
     static_assert(sizeof(ocl_handle) == sizeof(cl_context), "[GPU] Expected ocl_handle to be same size as cl_context");
     cl_context context = reinterpret_cast<cl_context>(ocl_ctx);
     cl_int error;
@@ -28,7 +28,7 @@ ze_handle ocl_ze_converter::convert_ocl_context_to_ze(ocl_handle ocl_ctx) {
     return ze_context;
 }
 
-ze_handle ocl_ze_converter::convert_ocl_queue_to_ze(ocl_handle ocl_queue) {
+ze_handle ocl_ze_converter::get_ze_cmd_list_from_cl_queue(ocl_handle ocl_queue) {
     static_assert(sizeof(ocl_handle) == sizeof(cl_command_queue), "[GPU] Expected ocl_handle to be same size as cl_command_queue");
     cl_command_queue queue = reinterpret_cast<cl_command_queue>(ocl_queue);
     cl_int error;
@@ -39,19 +39,20 @@ ze_handle ocl_ze_converter::convert_ocl_queue_to_ze(ocl_handle ocl_queue) {
     return ze_cmd_list;
 }
 
-ze_handle ocl_ze_converter::convert_ocl_buffer_to_ze(ocl_handle ocl_buffer) {
+ze_handle ocl_ze_converter::get_ze_mem_from_cl_mem(ocl_handle ocl_mem) {
     static_assert(sizeof(ocl_handle) == sizeof(cl_mem), "[GPU] Expected ocl_handle to be same size as cl_mem");
-    cl_mem mem = reinterpret_cast<cl_mem>(ocl_buffer);
+    cl_mem mem = reinterpret_cast<cl_mem>(ocl_mem);
     cl_int error;
     ze_handle ze_mem;
+    // ze_mem will be usm pointer for clBuffer and image handle for clImage
     error = clGetMemObjectInfo(mem, CL_L0_MEM_OBJ_HANDLE, sizeof(ze_handle), &ze_mem, nullptr);
     OPENVINO_ASSERT(error == CL_SUCCESS, "[GPU] clGetMemObjectInfo error code: ", std::to_string(error));
     OPENVINO_ASSERT(ze_mem != nullptr, "[GPU] Received nullptr when converting OCL buffer");
     return ze_mem;
 }
 
-ze_handle ocl_ze_converter::convert_ocl_device_to_ze(ocl_handle ocl_device) {
-    static_assert(sizeof(ocl_handle) == sizeof(cl_device_id), "[GPU] Expected ocl_handle to be same size as cl_mem");
+ze_handle ocl_ze_converter::get_ze_device_from_cl_device(ocl_handle ocl_device) {
+    static_assert(sizeof(ocl_handle) == sizeof(cl_device_id), "[GPU] Expected ocl_handle to be same size as cl_device_id");
     cl_device_id device = reinterpret_cast<cl_device_id>(ocl_device);
     ze_handle ze_device;
     cl_int error = clGetDeviceInfo(device, CL_L0_DEVICE_HANDLE, sizeof(ze_handle), &ze_device, nullptr);
@@ -60,22 +61,7 @@ ze_handle ocl_ze_converter::convert_ocl_device_to_ze(ocl_handle ocl_device) {
     return ze_device;
 }
 
-std::vector<ze_handle> ocl_ze_converter::get_ze_devices_from_ocl_context(ocl_handle ocl_ctx) {
-    cl::Context ctx = cl::Context(static_cast<cl_context>(ocl_ctx), true);
-    auto all_devices = ctx.getInfo<CL_CONTEXT_DEVICES>();
-
-    std::vector<ze_handle> supported_devices;
-    for (size_t i = 0; i < all_devices.size(); i++) {
-        auto& device = all_devices[i];
-        if (!ocl::does_device_match_config(device.get()))
-            continue;
-
-        supported_devices.emplace_back(convert_ocl_device_to_ze(device.get()));
-    }
-    return supported_devices;
-}
-
-ocl_handle ocl_ze_converter::convert_ze_context_to_ocl(ze_handle ze_ctx, ocl_handle ocl_device) {
+ocl_handle ocl_ze_converter::create_cl_context_from_ze_context(ocl_handle ocl_device, ze_handle ze_ctx) {
     cl_context_properties properties[] = {CL_L0_CONTEXT_HANDLE, reinterpret_cast<cl_context_properties>(ze_ctx), 0};
     constexpr cl_uint num_devices = 1;
     cl_int error;
@@ -85,7 +71,7 @@ ocl_handle ocl_ze_converter::convert_ze_context_to_ocl(ze_handle ze_ctx, ocl_han
     return converted_context;
 }
 
-ocl_handle ocl_ze_converter::convert_ze_cmd_list_to_ocl(ocl_handle ocl_ctx, ocl_handle ocl_device, ze_handle ze_cmd_list) {
+ocl_handle ocl_ze_converter::create_cl_queue_from_ze_cmd_list(ocl_handle ocl_ctx, ocl_handle ocl_device, ze_handle ze_cmd_list) {
     cl_mem_properties properties[] = {CL_L0_IMMEDIATE_CMD_LIST_HANDLE, reinterpret_cast<cl_properties>(ze_cmd_list), 0};
     cl_int error;
     auto converted_queue = clCreateCommandQueueWithProperties(reinterpret_cast<cl_context>(ocl_ctx), reinterpret_cast<cl_device_id>(ocl_device), properties, &error);
@@ -94,7 +80,7 @@ ocl_handle ocl_ze_converter::convert_ze_cmd_list_to_ocl(ocl_handle ocl_ctx, ocl_
     return converted_queue;
 }
 
-ocl_handle ocl_ze_converter::convert_ze_buffer_to_ocl(ocl_handle ocl_ctx, ze_handle ze_buffer) {
+ocl_handle ocl_ze_converter::create_cl_buffer_from_ze_usm(ocl_handle ocl_ctx, ze_handle ze_buffer) {
     cl_mem_properties properties[] = {CL_L0_MEM_OBJ_HANDLE, reinterpret_cast<cl_mem_properties>(ze_buffer), 0};
     cl_int error;
     // Size of the buffer should not be relevant for the conversion
@@ -102,6 +88,18 @@ ocl_handle ocl_ze_converter::convert_ze_buffer_to_ocl(ocl_handle ocl_ctx, ze_han
     cl_mem converted_mem = clCreateBufferWithProperties(reinterpret_cast<cl_context>(ocl_ctx), properties, 0, size, nullptr, &error);
     OPENVINO_ASSERT(error == CL_SUCCESS, "[GPU] clCreateBufferWithProperties error code: ", std::to_string(error));
     OPENVINO_ASSERT(converted_mem != nullptr, "[GPU] Received nullptr when converting ZE buffer");
+    return converted_mem;
+}
+
+ocl_handle ocl_ze_converter::create_cl_image_from_ze_image(ocl_handle ocl_ctx, ze_handle ze_image, const layout &layout) {
+    cl_mem_properties properties[] = {CL_L0_MEM_OBJ_HANDLE, reinterpret_cast<cl_mem_properties>(ze_image), 0};
+    cl_int error;
+    cl_image_format image_format = ocl::get_cl_image_format(layout);
+    cl_image_desc image_desc = ocl::get_cl_image_desc(layout);
+    cl_mem_flags flags = CL_MEM_READ_WRITE;
+    cl_mem converted_mem = clCreateImageWithProperties(reinterpret_cast<cl_context>(ocl_ctx), properties, flags, &image_format, &image_desc, nullptr, &error);
+    OPENVINO_ASSERT(error == CL_SUCCESS, "[GPU] clCreateImageWithProperties error code: ", std::to_string(error));
+    OPENVINO_ASSERT(converted_mem != nullptr, "[GPU] Received nullptr when converting ZE image");
     return converted_mem;
 }
 

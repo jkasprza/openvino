@@ -327,6 +327,7 @@ memory_capabilities init_memory_caps(ze_device_handle_t device, const device_inf
         }
     }
     memory_caps.push_back(allocation_type::ze_image);
+    memory_caps.push_back(allocation_type::cl_mem);
 
     return memory_capabilities(memory_caps);
 }
@@ -334,9 +335,11 @@ memory_capabilities init_memory_caps(ze_device_handle_t device, const device_inf
 }  // namespace
 
 
-ze_device::ze_device(ze_driver_handle_t driver, ze_device_handle_t device, bool initialize)
+ze_device::ze_device(ze_driver_handle_t driver, ze_device_handle_t device, ze_context_handle_t context, bool initialize)
 : _driver(driver)
 , _device(device)
+, _context(context)
+, _is_context_shared(context != nullptr)
 , _info(init_device_info(driver, device))
 , _mem_caps(init_memory_caps(device, _info)) {
     if (initialize) {
@@ -345,9 +348,10 @@ ze_device::ze_device(ze_driver_handle_t driver, ze_device_handle_t device, bool 
 }
 
 void ze_device::initialize() {
-    if (_is_initialized)
+    if (_is_initialized || _is_context_shared) {
+        _is_initialized = true;
         return;
-
+    }
     ze_context_desc_t context_desc = { ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0 };
     OV_ZE_EXPECT(zeContextCreate(_driver, &context_desc, &_context));
     _is_initialized = true;
@@ -358,7 +362,7 @@ bool ze_device::is_initialized() const {
 }
 
 bool ze_device::is_same(const device::ptr other) {
-    auto casted = downcast<ze_device>(other.get());
+    auto casted = dynamic_cast<ze_device*>(other.get());
     if (!casted)
         return false;
 
@@ -374,7 +378,7 @@ void ze_device::set_mem_caps(const memory_capabilities& memory_capabilities) {
 }
 
 ze_device::~ze_device() {
-    if (_is_initialized)
+    if (_is_initialized && !_is_context_shared)
         OV_ZE_WARN(zeContextDestroy(_context));
 }
 

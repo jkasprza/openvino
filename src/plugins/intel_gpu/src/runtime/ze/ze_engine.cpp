@@ -4,7 +4,6 @@
 
 #include "ze_engine.hpp"
 #include "intel_gpu/runtime/utils.hpp"
-#include "intel_gpu/runtime/ocl_ze_converter.hpp"
 #include "openvino/core/except.hpp"
 #include "ze_kernel_builder.hpp"
 #include "ze_api.h"
@@ -21,18 +20,103 @@
 #include <memory>
 #include <stdexcept>
 
+// For OCL interop
+#include "ocl/ocl_device.hpp"
+#include "intel_gpu/runtime/ocl_ze_converter.hpp"
+
 #ifdef ENABLE_ONEDNN_FOR_GPU
 #include <oneapi/dnnl/dnnl_ze.hpp>
 #endif
 namespace cldnn {
 namespace ze {
 
+namespace {
+
+ze_device::ptr ze_device_from_ocl_device(const ocl::ocl_device::ptr& ocl_dev) {
+    ze_device_handle_t device = reinterpret_cast<ze_device_handle_t>(
+        ocl_ze_converter::get_ze_device_from_cl_device(ocl_dev->get_handle(runtime_resources::OCL_DEVICE)));
+    ze_context_handle_t context = reinterpret_cast<ze_context_handle_t>(
+        ocl_ze_converter::get_ze_context_from_cl_context(ocl_dev->get_handle(runtime_resources::OCL_CONTEXT)));
+    // Currently there is no way to convert platform to driver directly
+    OV_ZE_EXPECT(zeInit(ZE_INIT_FLAG_GPU_ONLY));
+    uint32_t driver_count = 0;
+    OV_ZE_EXPECT(zeDriverGet(&driver_count, nullptr));
+    std::vector<ze_driver_handle_t> all_drivers(driver_count);
+    OV_ZE_EXPECT(zeDriverGet(&driver_count, &all_drivers[0]));
+    ze_driver_handle_t matching_driver = nullptr;
+    for (auto driver : all_drivers) {
+        uint32_t device_count = 0;
+        OV_ZE_EXPECT(zeDeviceGet(driver, &device_count, nullptr));
+        std::vector<ze_device_handle_t> all_devices(device_count);
+        OV_ZE_EXPECT(zeDeviceGet(driver, &device_count, all_devices.data()));
+        for (auto dev : all_devices) {
+            if (dev == device) {
+                matching_driver = driver;
+                break;
+            }
+        }
+        if (matching_driver != nullptr) {
+            break;
+        }
+    }
+    OPENVINO_ASSERT(matching_driver != nullptr, "[GPU] Unable to find matching Level Zero driver for the given OpenCL device");
+    bool initialize = ocl_dev->is_initialized();
+    return std::make_shared<ze_device>(matching_driver, device, context, initialize);
+}
+
+ocl::ocl_device::ptr ocl_device_from_ze_device(const ze_device::ptr& ze_dev) {
+    auto target_ze_device = ze_dev->get_handle(runtime_resources::ZE_DEVICE);
+    cl_platform_id matching_platform = nullptr;
+    cl_device_id matching_device = nullptr;
+    cl_uint num_platforms = 0;
+    cl_int error_code = clGetPlatformIDs(0, NULL, &num_platforms);
+    OPENVINO_ASSERT(num_platforms != 0, "[GPU] No OpenCL platforms found");
+    OPENVINO_ASSERT(error_code == CL_SUCCESS, "[GPU] clGetPlatformIDs error code: ", std::to_string(error_code));
+    std::vector<cl_platform_id> platform_ids(num_platforms);
+    error_code = clGetPlatformIDs(num_platforms, platform_ids.data(), NULL);
+    OPENVINO_ASSERT(error_code == CL_SUCCESS, "[GPU] clGetPlatformIDs error code: ", std::to_string(error_code));
+    for (auto& id : platform_ids) {
+        cl::Platform platform = cl::Platform(id);
+        try {
+            std::vector<cl::Device> devices;
+            platform.getDevices(CL_DEVICE_TYPE_GPU, &devices);
+            for (auto& device : devices) {
+                if (ocl_ze_converter::get_ze_device_from_cl_device(device.get()) == target_ze_device) {
+                    matching_device = device.get();
+                    matching_platform = id;
+                    break;
+                }
+            }
+        } catch (...) {
+            continue;
+        }
+        if (matching_device != nullptr) {
+            break;
+        }
+    }
+    OPENVINO_ASSERT(matching_device != nullptr, "[GPU] Unable to find matching OpenCL device for the given Level Zero device");
+    OPENVINO_ASSERT(matching_platform != nullptr, "[GPU] Unable to find matching OpenCL platform for the given Level Zero device");
+    cl_context context = reinterpret_cast<cl_context>(
+        ocl_ze_converter::create_cl_context_from_ze_context(matching_device, ze_dev->get_handle(runtime_resources::ZE_CONTEXT)));
+    bool initialize = ze_dev->is_initialized();
+    return std::make_shared<ocl::ocl_device>(cl::Device(matching_device), cl::Context(context), cl::Platform(matching_platform), initialize);
+}
+} // namespace
+
 ze_engine::ze_engine(const device::ptr dev, runtime_types runtime_type)
     : engine(dev) {
     OPENVINO_ASSERT(runtime_type == runtime_types::ze, "[GPU] Invalid runtime type specified for ZE engine. Only ZE runtime is supported");
 
-    auto casted = dynamic_cast<ze_device*>(dev.get());
-    OPENVINO_ASSERT(casted, "[GPU] Invalid device type passed to ze engine");
+    auto ze_casted = std::dynamic_pointer_cast<ze_device>(dev);
+    auto ocl_casted = std::dynamic_pointer_cast<ocl::ocl_device>(dev);
+    if (ze_casted == nullptr && ocl_casted != nullptr) {
+        ze_casted = ze_device_from_ocl_device(ocl_casted);
+    } else if (ocl_casted == nullptr && ze_casted != nullptr) {
+        ocl_casted = ocl_device_from_ze_device(ze_casted);
+    }
+    _device = ze_casted;
+    _ocl_device = ocl_casted;
+    OPENVINO_ASSERT(_device != nullptr && _ocl_device != nullptr, "[GPU] Expected to initialize both ze_device and ocl_device");
 
     _service_stream.reset(new ze_stream(*this, ExecutionConfig()));
 }
@@ -76,7 +160,16 @@ memory::ptr ze_engine::allocate_memory(const layout& layout, allocation_type typ
     check_allocatable(layout, type);
 
     try {
-        memory::ptr res = std::make_shared<ze::gpu_usm>(this, layout, type);
+        memory::ptr res;
+        if (layout.format.is_image_2d()) {
+            res = std::make_shared<ze::gpu_image2d>(this, layout);
+        } else if (type == allocation_type::cl_mem) {
+            res = std::make_shared<ze::ocl_buffer>(this, layout);
+        } else if (memory_capabilities::is_usm_type(type)){
+            res = std::make_shared<ze::gpu_usm>(this, layout, type);
+        } else {
+            OPENVINO_THROW("[GPU] Unsupported allocation type: ", type);
+        }
 
         if (reset || res->is_memory_reset_needed(layout)) {
             auto ev = res->fill(get_service_stream());
@@ -108,7 +201,12 @@ memory::ptr ze_engine::reinterpret_buffer(const memory& memory, const layout& ne
     } else if (new_layout.format.is_image_2d()) {
         reinterpret_memory = std::make_shared<ze::gpu_image2d>(this,
                                      new_layout,
-                                     reinterpret_cast<const ze::gpu_image2d&>(memory).get_handle(),
+                                     reinterpret_cast<const ze::gpu_image2d&>(memory).get_ocl_handle(),
+                                     memory.get_mem_tracker());
+    } else if (memory.get_allocation_type() == allocation_type::cl_mem) {
+        reinterpret_memory = std::make_shared<ze::ocl_buffer>(this,
+                                     new_layout,
+                                     reinterpret_cast<const ze::ocl_buffer&>(memory).get_ocl_handle(),
                                      memory.get_mem_tracker());
     } else {
         OPENVINO_THROW("[GPU] Unexpected memory type for reinterpret_buffer");
@@ -120,27 +218,11 @@ memory::ptr ze_engine::reinterpret_buffer(const memory& memory, const layout& ne
 memory::ptr ze_engine::reinterpret_handle(const layout& new_layout, shared_mem_params params) {
     if (params.mem_type == shared_mem_type::shared_mem_usm) {
         ze::UsmMemory usm_buffer(get_context(), get_device(), params.mem);
-        size_t actual_mem_size = 0;
-        OV_ZE_EXPECT(zeMemGetAddressRange(get_context(), params.mem, nullptr, &actual_mem_size));
-        auto requested_mem_size = new_layout.bytes_count();
-        OPENVINO_ASSERT(actual_mem_size >= requested_mem_size,
-                            "[GPU] shared USM buffer has smaller size (", actual_mem_size,
-                            ") than specified layout (", requested_mem_size, ")");
         return std::make_shared<ze::gpu_usm>(this, new_layout, usm_buffer, nullptr);
     } else if (params.mem_type == shared_mem_type::shared_mem_buffer) {
-        void *ze_mem = ocl_ze_converter::convert_ocl_buffer_to_ze(params.mem);
-        size_t actual_mem_size = 0;
-        OV_ZE_EXPECT(zeMemGetAddressRange(get_context(), ze_mem, nullptr, &actual_mem_size));
-        auto requested_mem_size = new_layout.bytes_count();
-        OPENVINO_ASSERT(actual_mem_size >= requested_mem_size,
-                        "[GPU] shared buffer has smaller size (", actual_mem_size,
-                        ") than specified layout (", requested_mem_size, ")");
-        ze::UsmMemory usm_buffer(get_context(), get_device(), ze_mem);
-        return std::make_shared<ze::gpu_usm>(this, new_layout, usm_buffer, nullptr);
+        return std::make_shared<ze::ocl_buffer>(this, new_layout, params.mem, nullptr);
     } else if (params.mem_type == shared_mem_type::shared_mem_image) {
-        void *ze_image = ocl_ze_converter::convert_ocl_buffer_to_ze(params.mem);
-        // There is no way to check image shape so we must assume layout is correct
-        return std::make_shared<ze::gpu_image2d>(this, new_layout, static_cast<ze_image_handle_t>(ze_image), nullptr);
+        return std::make_shared<ze::gpu_image2d>(this, new_layout, params.mem, nullptr);
     } else {
         OPENVINO_THROW("[GPU] Unsupported shared memory type: ", params.mem_type);
     }
