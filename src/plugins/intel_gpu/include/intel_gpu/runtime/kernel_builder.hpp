@@ -38,6 +38,7 @@ inline KernelFormat get_kernel_format(const kernel_language &lang) {
 /// @brief Interface for building the GPU kernels. Implementations must be thread-safe to support case where multiple threads use single builder.
 class kernel_builder {
 public:
+    virtual ~kernel_builder() = default;
     virtual void build_kernels(const void *src, size_t src_bytes, KernelFormat src_format, const std::string &options, std::vector<kernel::ptr> &out) const = 0;
 };
 
