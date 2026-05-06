@@ -118,10 +118,7 @@ if(ENABLE_ONEDNN_FOR_GPU)
         set(ONEDNN_GPU_DIR ${CMAKE_CURRENT_SOURCE_DIR}/onednn_gpu CACHE FILEPATH "Path to oneDNN GPU repository")
         if(GPU_RUNTIME STREQUAL "L0")
             set(ONEDNN_GPU_RT "ZE")
-            # OneDNN is using different version of L0 headers
-            # Disable LTO to avoid build issues
-            # Enable once headers are unified MFDNN-14973
-            set(ONEDNN_ENABLE_LTO OFF)
+            set(ONEDNN_ENABLE_LTO ${ENABLE_LTO})
         elseif(GPU_RUNTIME STREQUAL "OCL")
             set(ONEDNN_GPU_RT "OCL")
             set(ONEDNN_ENABLE_LTO ${ENABLE_LTO})
