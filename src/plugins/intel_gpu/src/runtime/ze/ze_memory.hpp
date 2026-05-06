@@ -47,6 +47,8 @@ public:
         return _usm_holder.get_handle();
     }
 
+    ze_holder<ze_resource_type::usm_memory> get_holder() const { return _usm_holder; }
+
     bool is_empty() const { return _usm_holder.is_empty(); }
 
     void allocateHost(size_t size) {

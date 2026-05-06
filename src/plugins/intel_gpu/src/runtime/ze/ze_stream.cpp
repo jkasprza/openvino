@@ -271,6 +271,7 @@ event::ptr ze_stream::enqueue_kernel(kernel& kernel,
     if (m_sync_method == SyncMethods::events) {
         for (auto& dep : deps) {
             if (auto ze_base_ev = std::dynamic_pointer_cast<ze_base_event>(dep)) {
+                retain(ze_base_ev->get_holder());
                 if (ze_base_ev->get_handle() != nullptr)
                     dep_events.push_back(ze_base_ev->get_handle());
             }
@@ -292,6 +293,10 @@ event::ptr ze_stream::enqueue_kernel(kernel& kernel,
                                              set_output_event ? std::dynamic_pointer_cast<ze_base_event>(ev)->get_handle() : nullptr,
                                              dep_events_ptr == nullptr ? 0 : static_cast<uint32_t>(dep_events_ptr->size()),
                                              dep_events_ptr == nullptr ? 0 : &dep_events_ptr->front()));
+    retain(ze_kernel.get_holder());
+    if (set_output_event) {
+        retain(downcast<ze::ze_base_event>(*ev.get()).get_holder());
+    }
 
     return ev;
 }
@@ -303,6 +308,8 @@ void ze_stream::enqueue_barrier() {
 event::ptr ze_stream::enqueue_marker(std::vector<ze_event::ptr> const& deps, bool is_output) {
     if (deps.empty()) {
         auto ev = create_base_event();
+        auto &ze_ev = downcast<ze::ze_base_event>(*ev.get());
+        retain(ze_ev.get_holder());
         OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(m_cmd_list_holder.get_handle(), std::dynamic_pointer_cast<ze_base_event>(ev)->get_handle(), 0, nullptr));
         return ev;
     }
@@ -319,6 +326,8 @@ event::ptr ze_stream::enqueue_marker(std::vector<ze_event::ptr> const& deps, boo
             return create_user_event(true);
 
         auto ev = create_base_event();
+        auto &ze_ev = downcast<ze::ze_base_event>(*ev.get());
+        retain(ze_ev.get_holder());
         OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(m_cmd_list_holder.get_handle(),
                                             std::dynamic_pointer_cast<ze_base_event>(ev)->get_handle(),
                                             static_cast<uint32_t>(dep_events.size()),
@@ -364,6 +373,7 @@ void ze_stream::flush() const {
 
 void ze_stream::finish() const {
     OV_ZE_EXPECT(ze::zeCommandListHostSynchronize(m_cmd_list_holder.get_handle(), endless_wait));
+    clear_resources();
 }
 
 void ze_stream::wait_for_events(const std::vector<event::ptr>& events) {
@@ -398,6 +408,7 @@ void ze_stream::sync_events(std::vector<event::ptr> const& deps, bool is_output)
         if (is_output) {
             m_last_barrier_ev = std::dynamic_pointer_cast<ze_event>(create_base_event());
             m_last_barrier_ev->set_queue_stamp(m_queue_counter.load());
+            retain(m_last_barrier_ev->get_holder());
             OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(m_cmd_list_holder.get_handle(), m_last_barrier_ev->get_handle(), 0, nullptr));
         } else {
             OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(m_cmd_list_holder.get_handle(), nullptr, 0, nullptr));

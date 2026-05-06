@@ -41,6 +41,13 @@ std::vector<ze_event_handle_t> get_ze_events(const std::vector<event::ptr>& even
     return ze_events;
 }
 
+void retain_events(stream& stream, const std::vector<event::ptr>& events) {
+    auto &zero_stream = downcast<ze_stream>(stream);
+     for (const auto& ev : events) {
+        zero_stream.retain(downcast<ze::ze_base_event>(ev.get())->get_holder());
+    }
+}
+
 size_t get_element_size(const ze_image_format_layout_t& ze_layout) {
     switch(ze_layout) {
         case ZE_IMAGE_FORMAT_LAYOUT_8:
@@ -183,6 +190,7 @@ void* gpu_usm::lock(const stream& stream, mem_lock_type type) {
                                     0,
                                     nullptr));
             OV_ZE_EXPECT(ze::zeCommandListHostSynchronize(_ze_stream.get_queue(), endless_wait));
+            // No need to retain resources as we synchronize the stream
             _mapped_ptr = _host_buffer.get();
         } else {
             _mapped_ptr = _buffer.get();
@@ -222,6 +230,10 @@ event::ptr gpu_usm::fill(stream& stream, unsigned char pattern, const std::vecto
         ze_dep_events.data()));
     if (blocking) {
         ev->wait();
+    } else {
+        _ze_stream.retain(downcast<ze::ze_base_event>(ev.get())->get_holder());
+        retain_events(stream, dep_events);
+        _ze_stream.retain(_buffer.get_holder());
     }
     return ev;
 }
@@ -251,6 +263,9 @@ event::ptr gpu_usm::copy_from(stream& stream, const void* data_ptr, size_t src_o
 
     if (blocking) {
         result_event->wait();
+    } else {
+        _ze_stream->retain(downcast<ze::ze_base_event>(result_event.get())->get_holder());
+        _ze_stream->retain(_buffer.get_holder());
     }
 
     return result_event;
@@ -279,6 +294,10 @@ event::ptr gpu_usm::copy_from(stream& stream, const memory& src_mem, size_t src_
                                            nullptr));
     if (blocking) {
         result_event->wait();
+    } else {
+        _ze_stream->retain(downcast<ze::ze_base_event>(result_event.get())->get_holder());
+        _ze_stream->retain(usm_mem->_buffer.get_holder());
+        _ze_stream->retain(_buffer.get_holder());
     }
 
     return result_event;
@@ -304,6 +323,9 @@ event::ptr gpu_usm::copy_to(stream& stream, void* data_ptr, size_t src_offset, s
                                            nullptr));
     if (blocking) {
         result_event->wait();
+    } else {
+        _ze_stream->retain(downcast<ze::ze_base_event>(result_event.get())->get_holder());
+        _ze_stream->retain(_buffer.get_holder());
     }
 
     return result_event;
@@ -472,6 +494,7 @@ void* gpu_image2d::lock(const stream& stream, mem_lock_type type) {
                 nullptr));
             // Block thread and wait for copy and previous operations to finish
             OV_ZE_EXPECT(ze::zeCommandListHostSynchronize(zero_stream.get_queue(), endless_wait));
+            // No need to retain resources as we synchronize the stream
         }
         _mapped_ptr = _host_buffer.get();
     }
@@ -496,6 +519,8 @@ void gpu_image2d::unlock(const stream& stream) {
                 nullptr));
             // Insert barrier to ensure that following commands have correct image data
             OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(zero_stream.get_queue(), nullptr, 0, nullptr));
+            zero_stream.retain(_image_holder);
+            zero_stream.retain(_host_buffer.get_holder());
         }
         _host_buffer.freeMem();
         _mapped_ptr = nullptr;
@@ -534,6 +559,7 @@ event::ptr gpu_image2d::fill(stream& stream, unsigned char pattern, const std::v
                 ev_result_handle,
                 ze_dep_events.size(),
                 ze_dep_events.data()));
+    // No need to retain resources as we always block
     if (!blocking) {
         // Need to ensure that fill is finished before returning from this function and releasing fill_buffer
         blocking = true;
@@ -580,6 +606,9 @@ event::ptr gpu_image2d::copy_from(stream& stream, const void* data_ptr, size_t s
         nullptr));
     if (blocking) {
         result_event->wait();
+    } else {
+        zero_stream->retain(downcast<ze::ze_base_event>(result_event.get())->get_holder());
+        zero_stream->retain(_image_holder);
     }
     return result_event;
 }
@@ -604,6 +633,10 @@ event::ptr gpu_image2d::copy_from(stream& stream, const memory& src_mem, size_t 
         nullptr));
     if (blocking) {
         result_event->wait();
+    } else {
+        zero_stream->retain(downcast<ze::ze_base_event>(result_event.get())->get_holder());
+        zero_stream->retain(_image_holder);
+        zero_stream->retain(src_image->_image_holder);
     }
     return result_event;
 }
@@ -627,6 +660,9 @@ event::ptr gpu_image2d::copy_to(stream& stream, void* data_ptr, size_t src_offse
         nullptr));
     if (blocking) {
         result_event->wait();
+    } else {
+        zero_stream->retain(downcast<ze::ze_base_event>(result_event.get())->get_holder());
+        zero_stream->retain(_image_holder);
     }
     return result_event;
 }

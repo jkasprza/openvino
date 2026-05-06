@@ -23,6 +23,7 @@ public:
 
     std::optional<ze_kernel_timestamp_result_t> query_timestamp() override;
     ze_event_handle_t get_handle() const override;
+    ze_holder_variant get_holder() const override { return m_event; }
     bool get_profiling_info_impl(std::list<instrumentation::profiling_interval>& info) override;
 
 protected:

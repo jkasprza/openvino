@@ -12,12 +12,28 @@
 #include "ze_event.hpp"
 #include "ze_base_event_factory.hpp"
 
+#include <queue>
+
 namespace cldnn {
 namespace ze {
 
 class ze_stream : public stream {
 public:
     ze_command_list_handle_t get_queue() const { return m_cmd_list_holder.get_handle(); }
+    void retain(ze_holder_variant resource) const {
+        bool empty = true;
+        std::visit([&empty](auto&& arg){
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, std::monostate>) {
+                empty = true;
+            } else {
+                empty = arg.is_empty();
+            }
+        }, resource);
+        if (!empty) {
+            m_resources.push(std::move(resource));
+        }
+    }
     const ze_engine& get_engine() const { return _engine; }
 
     ze_stream(const ze_engine& engine, const ExecutionConfig& config);
@@ -25,6 +41,7 @@ public:
         : stream(other.m_queue_type, other.m_sync_method)
         , _engine(other._engine)
         , m_cmd_list_holder(std::move(other.m_cmd_list_holder))
+        , m_resources(std::move(other.m_resources))
         , m_queue_counter(other.m_queue_counter.load())
         , m_last_barrier(other.m_last_barrier.load())
         , m_last_barrier_ev(other.m_last_barrier_ev)
@@ -58,10 +75,16 @@ public:
 #endif
 
 private:
+    void clear_resources() const {
+        while (!m_resources.empty()) {
+            m_resources.pop();
+        }
+    }
     void sync_events(std::vector<event::ptr> const& deps, bool is_output = false);
 
     const ze_engine& _engine;
     ze_holder<ze_resource_type::command_list> m_cmd_list_holder;
+    mutable std::queue<ze_holder_variant> m_resources;
     mutable std::atomic<uint64_t> m_queue_counter{0};
     std::atomic<uint64_t> m_last_barrier{0};
     std::shared_ptr<ze_event> m_last_barrier_ev = nullptr;

@@ -7,6 +7,7 @@
 #include "intel_gpu/runtime/event.hpp"
 #include "ze_base_event_factory.hpp"
 #include "ze_common.hpp"
+#include "ze_holder.hpp"
 
 #include <chrono>
 #include <optional>
@@ -24,6 +25,7 @@ public:
     void set_queue_stamp(uint64_t val) { m_queue_stamp = val; }
 
     virtual ze_event_handle_t get_handle() const = 0;
+    virtual ze_holder_variant get_holder() const = 0;
     virtual std::optional<ze_kernel_timestamp_result_t> query_timestamp() = 0;
 
 protected:

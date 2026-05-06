@@ -26,7 +26,8 @@ public:
     }
 
     std::optional<ze_kernel_timestamp_result_t> query_timestamp() override { return std::nullopt; }
-    ze_event_handle_t get_handle() const override { return _last_ze_event; }
+    ze_event_handle_t get_handle() const override { return _last_ze_event->get_handle(); }
+    ze_holder_variant get_holder() const override { return _last_ze_event->get_holder(); }
     bool get_profiling_info_impl(std::list<instrumentation::profiling_interval>& info) override;
 
 protected:
@@ -39,21 +40,21 @@ protected:
             auto multiple_events = dynamic_cast<ze_events*>(ev[i].get());
             if (multiple_events) {
                 for (size_t j = 0; j < multiple_events->_events.size(); j++) {
-                    if (auto base_ev = dynamic_cast<ze_base_event*>(multiple_events->_events[j].get())) {
+                    if (auto base_ev = std::dynamic_pointer_cast<ze_base_event>(multiple_events->_events[j])) {
                         auto current_ev_queue_stamp = base_ev->get_queue_stamp();
                         if ((m_queue_stamp == 0) || (current_ev_queue_stamp > m_queue_stamp)) {
                             m_queue_stamp = current_ev_queue_stamp;
-                            _last_ze_event = base_ev->get_handle();
+                            _last_ze_event = base_ev;
                         }
                     }
                     _events.push_back(multiple_events->_events[j]);
                 }
             } else {
-                if (auto base_ev = dynamic_cast<ze_base_event*>(ev[i].get())) {
+                if (auto base_ev = std::dynamic_pointer_cast<ze_base_event>(ev[i])) {
                     auto current_ev_queue_stamp = base_ev->get_queue_stamp();
                     if ((m_queue_stamp == 0) || (current_ev_queue_stamp > m_queue_stamp)) {
                         m_queue_stamp = current_ev_queue_stamp;
-                        _last_ze_event = base_ev->get_handle();
+                        _last_ze_event = base_ev;
                     }
                 }
                 _events.push_back(ev[i]);
@@ -61,7 +62,7 @@ protected:
         }
     }
 
-    ze_event_handle_t _last_ze_event = nullptr;
+    std::shared_ptr<ze_base_event> _last_ze_event = nullptr;
     std::vector<event::ptr> _events;
     const ze_engine &_engine;
 };

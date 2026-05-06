@@ -103,6 +103,8 @@ public:
         return log;
     }
 
+    ze_holder<ze_resource_type::kernel> get_holder() const { return m_kernel; }
+
 private:
     ze_holder<ze_resource_type::kernel> m_kernel;
     ze_holder<ze_resource_type::module_build_log> m_build_log;

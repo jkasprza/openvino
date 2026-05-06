@@ -21,6 +21,7 @@ public:
     void set_impl() override { }
     bool is_set_impl() override { return true; }
     ze_event_handle_t get_handle() const override { return nullptr; }
+    ze_holder_variant get_holder() const override { return {}; }
     std::optional<ze_kernel_timestamp_result_t> query_timestamp() override { return std::nullopt; }
     bool get_profiling_info_impl(std::list<instrumentation::profiling_interval>& info) override {
         return true;
