@@ -28,7 +28,7 @@ ze_counter_based_event_factory::ze_counter_based_event_factory(const ze_engine &
     std::call_once(counter_based_ev_init_flag, find_function_address, engine.get_driver().handle());
 }
 
-event::ptr ze_counter_based_event_factory::create_event(uint64_t queue_stamp) {
+event::ptr ze_counter_based_event_factory::create_event(uint64_t queue_stamp, const ze_stream& stream) {
     std::lock_guard<std::mutex> lock(_mutex);
 
     ze_event_handle_t event;
@@ -38,6 +38,6 @@ event::ptr ze_counter_based_event_factory::create_event(uint64_t queue_stamp) {
     }
     OV_ZE_EXPECT(func_zexCounterBasedEventCreate2(m_engine.get_context().handle(), m_engine.get_device().handle(), &desc, &event));
     auto ev_holder = ze_event_resource(event);
-    auto cb_event = std::make_shared<ze_counter_based_event>(queue_stamp, *this, ev_holder);
+    auto cb_event = std::make_shared<ze_counter_based_event>(queue_stamp, *this, ev_holder, stream);
     return cb_event;
 }

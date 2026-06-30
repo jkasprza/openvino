@@ -16,7 +16,7 @@ namespace ze {
 struct ze_event_factory : public ze_base_event_factory {
 public:
     ze_event_factory(const ze_engine &engine, bool enable_profiling, uint32_t capacity = 255);
-    event::ptr create_event(uint64_t queue_stamp) override;
+    event::ptr create_event(uint64_t queue_stamp, const ze_stream& stream) override;
 protected:
     std::mutex _mutex;
     ze_event_pool_resource m_current_pool;

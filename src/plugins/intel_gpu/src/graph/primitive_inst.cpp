@@ -2029,9 +2029,16 @@ void primitive_inst::set_out_event(event::ptr&& ev) {
     _impl_params->out_event = ev;
 }
 
-void primitive_inst::reset_events() {
+void primitive_inst::clear_events() {
     _impl_params->dep_events.clear();
     _impl_params->out_event = nullptr;
+}
+
+void primitive_inst::reset_events() {
+    //_impl_params->dep_events.clear();
+    //_impl_params->out_event = nullptr;
+    _impl_params->dep_events.clear();
+    _impl_params->out_event->reset();
 }
 
 void primitive_inst::set_flag(size_t flag, bool value) {
@@ -2047,6 +2054,13 @@ bool primitive_inst::get_flag(size_t flag) const {
 
 void primitive_inst::reset_flags() {
     _impl_params->flags.reset();
+}
+
+bool primitive_inst::is_changed() const {
+    return get_flag(ExecutionFlags::SHAPE_CHANGED)
+        || get_flag(ExecutionFlags::IMPL_CHANGED)
+        || get_flag(ExecutionFlags::MEMORY_CHANGED)
+        || get_flag(ExecutionFlags::ARG_UPDATE_REQUIRED);
 }
 
 void primitive_inst::prepare_primitive() {

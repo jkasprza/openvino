@@ -12,12 +12,24 @@
 #include "ze_event.hpp"
 #include "ze_base_event_factory.hpp"
 
+#include <queue>
+
 namespace cldnn {
 namespace ze {
 
 class ze_stream : public stream {
 public:
-    ze_command_list_handle_t get_queue() const { return m_cmd_list.handle(); }
+    ze_command_list_handle_t get_queue() const {
+        if (is_immediate()) {
+            OPENVINO_THROW("[GPU] Immediate execution disabled for this experiment");
+            return m_imm_cmd_list->handle();
+        }
+        if (m_cmd_lists.empty()) {
+            add_new_cmd_list();
+        }
+        return m_cmd_lists.front().cmd_list.handle(); 
+    }
+    bool is_immediate() const { return m_imm_cmd_list.has_value(); }
     const ze_engine& get_engine() const { return _engine; }
 
     ze_stream(const ze_engine& engine, const ExecutionConfig& config);
@@ -25,7 +37,10 @@ public:
     ze_stream(ze_stream&& other)
         : stream(other.m_queue_type, other.m_sync_method)
         , _engine(other._engine)
-        , m_cmd_list(std::move(other.m_cmd_list))
+        , m_cmd_lists(std::move(other.m_cmd_lists))
+        , m_busy_cmd_lists(std::move(other.m_busy_cmd_lists))
+        , m_reuse_cmd_list(std::move(other.m_reuse_cmd_list))
+        , m_imm_cmd_list(std::move(other.m_imm_cmd_list))
         , m_queue_counter(other.m_queue_counter.load())
         , m_last_barrier(other.m_last_barrier.load())
         , m_last_barrier_ev(other.m_last_barrier_ev)
@@ -35,7 +50,23 @@ public:
 
     ~ze_stream();
 
+    virtual bool can_resubmit() override {
+        return m_reuse_cmd_list.has_value();
+    }
+    virtual void resubmit() override {
+        OPENVINO_ASSERT(m_reuse_cmd_list.has_value(), "[GPU] Attempt to resubmit stream without reusable command list");
+        submit_cmd_list();
+        auto cmd_list = m_reuse_cmd_list.value();
+        auto cmd_list_handle = cmd_list.cmd_list.handle();
+        OV_ZE_EXPECT(ze::zeCommandQueueExecuteCommandLists(m_cmd_queue.handle(), 1, &cmd_list_handle, cmd_list.fence.handle()));
+        m_busy_cmd_lists.push(cmd_list);
+        m_reuse_cmd_list = std::nullopt;
+    }
+
     void flush() const override;
+    void flush_cmd_list() const {
+        submit_cmd_list();
+    }
     void finish() const override;
     void wait() override;
 
@@ -60,9 +91,28 @@ public:
 
 private:
     void sync_events(std::vector<event::ptr> const& deps, bool is_output = false);
+    void add_new_cmd_list() const;
+    void submit_cmd_list() const;
+    void finish_busy_cmd_lists() const;
+    struct command_list {
+        ze_command_list_resource cmd_list;
+        ze_fence_resource fence;
+#ifdef ENABLE_ONEDNN_FOR_GPU
+        std::shared_ptr<dnnl::stream> onednn_stream;
+#endif
+        ~command_list() {
+#ifdef ENABLE_ONEDNN_FOR_GPU
+            onednn_stream.reset();
+#endif
+        }
+    };
 
     const ze_engine& _engine;
-    ze_command_list_resource m_cmd_list;
+    mutable std::queue<command_list> m_cmd_lists;
+    mutable std::queue<command_list> m_busy_cmd_lists;
+    mutable std::optional<command_list> m_reuse_cmd_list;
+    std::optional<ze_command_list_resource> m_imm_cmd_list;
+    ze_command_queue_resource m_cmd_queue;
     mutable std::atomic<uint64_t> m_queue_counter{0};
     std::atomic<uint64_t> m_last_barrier{0};
     std::shared_ptr<ze_event> m_last_barrier_ev = nullptr;
@@ -70,7 +120,7 @@ private:
     std::shared_ptr<ze_base_event_factory> m_user_ev_factory;
 
 #ifdef ENABLE_ONEDNN_FOR_GPU
-    std::shared_ptr<dnnl::stream> _onednn_stream = nullptr;
+    std::shared_ptr<dnnl::stream> _imm_onednn_stream = nullptr;
 #endif
 };
 

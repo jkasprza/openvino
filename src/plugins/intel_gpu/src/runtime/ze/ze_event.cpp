@@ -4,6 +4,7 @@
 
 #include "ze_event.hpp"
 #include "ze/ze_common.hpp"
+#include "ze/ze_stream.hpp"
 
 #include <cassert>
 #include <chrono>
@@ -18,6 +19,7 @@ void ze_event::reset() {
 }
 
 void ze_event::wait_impl() {
+    m_stream.flush_cmd_list();
     OV_ZE_EXPECT(ze::zeEventHostSynchronize(m_event.handle(), endless_wait));
 }
 

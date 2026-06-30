@@ -18,10 +18,11 @@ namespace ze {
 // Can only be used with in-order command lists.
 struct ze_counter_based_event : public ze_base_event {
 public:
-    ze_counter_based_event(uint64_t queue_stamp, const ze_base_event_factory& factory, ze_event_resource ev)
+    ze_counter_based_event(uint64_t queue_stamp, const ze_base_event_factory& factory, ze_event_resource ev, const ze_stream& stream)
     : ze_base_event(queue_stamp)
     , m_factory(factory)
-    , m_event(ev) {
+    , m_event(ev)
+    , m_stream(stream) {
         OPENVINO_ASSERT(!m_event.is_empty(), "[GPU] Attempt to create counter based event with empty holder");
     }
 
@@ -35,6 +36,7 @@ public:
 protected:
     const ze_base_event_factory& m_factory;
     ze_event_resource m_event;
+    const ze_stream& m_stream;
 };
 
 }  // namespace ze

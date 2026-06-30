@@ -16,7 +16,7 @@ ze_event_factory::ze_event_factory(const ze_engine &engine, bool enable_profilin
 , m_capacity(capacity)
 , m_num_used(0) { }
 
-event::ptr ze_event_factory::create_event(uint64_t queue_stamp) {
+event::ptr ze_event_factory::create_event(uint64_t queue_stamp, const ze_stream& stream) {
     std::lock_guard<std::mutex> lock(_mutex);
 
     if (m_num_used >= m_capacity || m_current_pool.is_empty()) {
@@ -47,5 +47,5 @@ event::ptr ze_event_factory::create_event(uint64_t queue_stamp) {
     OV_ZE_EXPECT(ze::zeEventCreate(m_current_pool.handle(), &event_desc, &event));
     auto event_holder = ze_event_resource(event);
 
-    return std::make_shared<ze_event>(queue_stamp, *this, event_holder, m_current_pool);
+    return std::make_shared<ze_event>(queue_stamp, *this, event_holder, m_current_pool, stream);
 }

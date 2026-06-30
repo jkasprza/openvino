@@ -55,6 +55,13 @@ public:
     virtual void finish() const = 0;
     virtual void wait() = 0;
 
+    virtual bool can_resubmit() {
+        OPENVINO_NOT_IMPLEMENTED;
+    }
+    virtual void resubmit() {
+        OPENVINO_NOT_IMPLEMENTED;
+    }
+
     virtual void set_arguments(kernel& kernel, const kernel_arguments_desc& args_desc, const kernel_arguments_data& args) = 0;
     virtual event::ptr enqueue_kernel(kernel& kernel,
                                       const kernel_arguments_desc& args_desc,

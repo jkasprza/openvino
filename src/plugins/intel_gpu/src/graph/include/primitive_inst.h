@@ -291,7 +291,9 @@ public:
     void unset_flag(size_t flag);
     bool get_flag(size_t flag) const;
     void reset_flags();
+    bool is_changed() const;
 
+    void clear_events();
     void reset_events();
 
     void prepare_primitive();

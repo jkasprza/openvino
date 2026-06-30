@@ -9,6 +9,7 @@
 
 namespace cldnn {
 namespace ze {
+    class ze_stream;
 
 // Interface for creating Level Zero events
 struct ze_base_event_factory {
@@ -19,7 +20,7 @@ public:
     bool is_profiling_enabled() const { return m_profiling_enabled; }
 
     virtual ~ze_base_event_factory() {}
-    virtual event::ptr create_event(uint64_t queue_stamp) = 0;
+    virtual event::ptr create_event(uint64_t queue_stamp, const ze_stream& stream) = 0;
 protected:
     const ze_engine& m_engine;
     const bool m_profiling_enabled;
