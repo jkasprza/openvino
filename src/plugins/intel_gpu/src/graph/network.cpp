@@ -939,16 +939,13 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     if (_stream->can_resubmit()) {
         bool primitives_updated = false;
         for (auto& inst : _exec_order) {
-            NODE_DEBUG(*inst);
-            OV_ITT_SCOPED_TASK_BASE(ov::intel_gpu::itt::domains::intel_gpu_op, openvino::itt::handle(inst->id()));
-
             inst->reset_events();
             inst->prepare_primitive();
             primitives_updated = primitives_updated || inst->is_changed();
         }
         if (!primitives_updated) {
             GPU_DEBUG_INFO << "[GPU] Resubmitting stream for network execution" << std::endl;
-            _stream->resubmit();
+            _stream->resubmit(events);
             resubmitted = true;
         } else {
             for (auto& inst : _exec_order) {
@@ -960,24 +957,24 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
         GPU_DEBUG_INFO << "[GPU] Could not resubmit stream as previous iteration was fragmented" << std::endl;
     }
     if (!resubmitted) {
-    for (auto& inst : _exec_order) {
-        NODE_DEBUG(*inst);
-        OV_ITT_SCOPED_TASK_BASE(ov::intel_gpu::itt::domains::intel_gpu_op, openvino::itt::handle(inst->id()));
+        for (auto& inst : _exec_order) {
+            NODE_DEBUG(*inst);
+            OV_ITT_SCOPED_TASK_BASE(ov::intel_gpu::itt::domains::intel_gpu_op, openvino::itt::handle(inst->id()));
 
-        inst->clear_events();
+            inst->clear_events();
 
-        //TODO: Consider add_dep_events in resubmit case
-        if (inst->is_input()) {
-            inst->add_dep_events(events);
+            //TODO: Consider add_dep_events in resubmit case
+            if (inst->is_input()) {
+                inst->add_dep_events(events);
+            }
+
+            inst->prepare_primitive();
+            inst->execute();
+
+            executed_prims++;
+            if (needs_flushing && executed_prims % flush_frequency == 0)
+                get_stream().flush();
         }
-
-        inst->prepare_primitive();
-        inst->execute();
-
-        executed_prims++;
-        if (needs_flushing && executed_prims % flush_frequency == 0)
-            get_stream().flush();
-    }
     }
 
     // Using output of previous network as input to another one may cause hazard (in OOOQ mode) if user would not

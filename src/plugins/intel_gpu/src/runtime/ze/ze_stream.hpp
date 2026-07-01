@@ -17,19 +17,29 @@
 namespace cldnn {
 namespace ze {
 
+enum class ze_stream_execution_mode {
+    immediate = 0,
+    deferred = 1
+};
+
 class ze_stream : public stream {
 public:
     ze_command_list_handle_t get_queue() const {
         if (is_immediate()) {
             OPENVINO_THROW("[GPU] Immediate execution disabled for this experiment");
-            return m_imm_cmd_list->handle();
+            return m_imm_cmd_list.handle();
         }
         if (m_cmd_lists.empty()) {
             add_new_cmd_list();
         }
         return m_cmd_lists.front().cmd_list.handle(); 
     }
-    bool is_immediate() const { return m_imm_cmd_list.has_value(); }
+
+    ze_command_list_handle_t get_cp_queue() const {
+        return m_imm_cmd_list.handle();
+    }
+
+    bool is_immediate() const { return mode == ze_stream_execution_mode::immediate; }
     const ze_engine& get_engine() const { return _engine; }
 
     ze_stream(const ze_engine& engine, const ExecutionConfig& config);
@@ -53,9 +63,37 @@ public:
     virtual bool can_resubmit() override {
         return m_reuse_cmd_list.has_value();
     }
-    virtual void resubmit() override {
+    virtual void resubmit(const std::vector<event::ptr>& events) override {
         OPENVINO_ASSERT(m_reuse_cmd_list.has_value(), "[GPU] Attempt to resubmit stream without reusable command list");
+        static ze_command_list_resource sync_cmd_list;
+        if (sync_cmd_list.is_empty()) {
+            const auto &info = _engine.get_device_info();
+            auto ctx_handle = _engine.get_context().handle();
+            auto device_handle = _engine.get_device().handle();
+
+            ze_command_list_handle_t cmd_list_handle = nullptr;
+            ze_command_list_flags_t flags = m_queue_type == QueueTypes::out_of_order ? 0 : ZE_COMMAND_LIST_FLAG_IN_ORDER;
+            ze_command_list_desc_t command_list_desc = {ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC, nullptr, info.compute_queue_group_ordinal, flags};
+            OV_ZE_EXPECT(ze::zeCommandListCreate(ctx_handle, device_handle, &command_list_desc, &cmd_list_handle));
+            sync_cmd_list = ze_command_list_resource(cmd_list_handle);
+        }
+        // submit commands in flight
         submit_cmd_list();
+        // prepare and submit sync cmd list
+        std::vector<ze_event_handle_t> dep_events;
+        for (auto& dep : events) {
+            if (auto ze_base_ev = std::dynamic_pointer_cast<ze_base_event>(dep)) {
+                if (ze_base_ev->get_handle() != nullptr)
+                    dep_events.push_back(ze_base_ev->get_handle());
+            }
+        }
+        if (dep_events.size() > 0) {
+            OV_ZE_EXPECT(ze::zeCommandListReset(sync_cmd_list.handle()));
+            OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(sync_cmd_list.handle(), nullptr, dep_events.size(), dep_events.data()));
+            OV_ZE_EXPECT(ze::zeCommandListClose(sync_cmd_list.handle()));
+            auto cmd_list_handle = sync_cmd_list.handle();
+            OV_ZE_EXPECT(ze::zeCommandQueueExecuteCommandLists(m_cmd_queue.handle(), 1, &cmd_list_handle, nullptr));
+        }
         auto cmd_list = m_reuse_cmd_list.value();
         auto cmd_list_handle = cmd_list.cmd_list.handle();
         OV_ZE_EXPECT(ze::zeCommandQueueExecuteCommandLists(m_cmd_queue.handle(), 1, &cmd_list_handle, cmd_list.fence.handle()));
@@ -111,13 +149,14 @@ private:
     mutable std::queue<command_list> m_cmd_lists;
     mutable std::queue<command_list> m_busy_cmd_lists;
     mutable std::optional<command_list> m_reuse_cmd_list;
-    std::optional<ze_command_list_resource> m_imm_cmd_list;
+    ze_command_list_resource m_imm_cmd_list;
     ze_command_queue_resource m_cmd_queue;
     mutable std::atomic<uint64_t> m_queue_counter{0};
     std::atomic<uint64_t> m_last_barrier{0};
     std::shared_ptr<ze_event> m_last_barrier_ev = nullptr;
     std::shared_ptr<ze_base_event_factory> m_ev_factory;
     std::shared_ptr<ze_base_event_factory> m_user_ev_factory;
+    ze_stream_execution_mode mode = ze_stream_execution_mode::deferred;
 
 #ifdef ENABLE_ONEDNN_FOR_GPU
     std::shared_ptr<dnnl::stream> _imm_onednn_stream = nullptr;

@@ -58,7 +58,7 @@ public:
     virtual bool can_resubmit() {
         OPENVINO_NOT_IMPLEMENTED;
     }
-    virtual void resubmit() {
+    virtual void resubmit(std::vector<event::ptr> const& deps) {
         OPENVINO_NOT_IMPLEMENTED;
     }
 

@@ -2038,7 +2038,9 @@ void primitive_inst::reset_events() {
     //_impl_params->dep_events.clear();
     //_impl_params->out_event = nullptr;
     _impl_params->dep_events.clear();
-    _impl_params->out_event->reset();
+    if (_impl_params->out_event) {
+        _impl_params->out_event->reset();
+    }
 }
 
 void primitive_inst::set_flag(size_t flag, bool value) {
@@ -2057,10 +2059,23 @@ void primitive_inst::reset_flags() {
 }
 
 bool primitive_inst::is_changed() const {
-    return get_flag(ExecutionFlags::SHAPE_CHANGED)
-        || get_flag(ExecutionFlags::IMPL_CHANGED)
-        || get_flag(ExecutionFlags::MEMORY_CHANGED)
-        || get_flag(ExecutionFlags::ARG_UPDATE_REQUIRED);
+    if (get_flag(ExecutionFlags::SHAPE_CHANGED)) {
+        GPU_DEBUG_TRACE_DETAIL << id() << " : SHAPE_CHANGED" << std::endl;
+        return false;
+    }
+    if (get_flag(ExecutionFlags::IMPL_CHANGED)) {
+        GPU_DEBUG_TRACE_DETAIL << id() << " : IMPL_CHANGED" << std::endl;
+        return true;
+    }
+    if (get_flag(ExecutionFlags::MEMORY_CHANGED)) {
+        GPU_DEBUG_TRACE_DETAIL << id() << " : MEMORY_CHANGED" << std::endl;
+        return false;
+    }
+    if (get_flag(ExecutionFlags::ARG_UPDATE_REQUIRED)) {
+        GPU_DEBUG_TRACE_DETAIL << id() << " : ARG_UPDATE_REQUIRED" << std::endl;
+        return false;
+    }
+    return false;
 }
 
 void primitive_inst::prepare_primitive() {

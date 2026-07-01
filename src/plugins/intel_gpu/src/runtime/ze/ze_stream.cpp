@@ -239,6 +239,11 @@ ze_stream::ze_stream(const ze_engine &engine, const ExecutionConfig& config)
     OV_ZE_EXPECT(ze::zeCommandQueueCreate(ctx_handle, device_handle, &command_queue_desc, &queue_handle));
     m_cmd_queue = ze_command_queue_resource(queue_handle);
 
+    ze_command_list_handle_t cmd_list = nullptr;
+    command_queue_desc.flags = m_queue_type == QueueTypes::out_of_order ? 0 : ZE_COMMAND_QUEUE_FLAG_IN_ORDER;
+    OV_ZE_EXPECT(ze::zeCommandListCreateImmediate(ctx_handle, device_handle, &command_queue_desc, &cmd_list));
+    m_imm_cmd_list = ze_command_list_resource(cmd_list);
+
     bool use_counter_based_events = m_queue_type == QueueTypes::in_order && info.supports_counter_based_events;
     m_user_ev_factory = std::make_shared<ze_event_factory>(engine, config.get_enable_profiling());
     if (use_counter_based_events) {
@@ -258,6 +263,7 @@ ze_stream::ze_stream(const ze_engine& engine, const ExecutionConfig& config, ze_
     : stream(detect_queue_type(cmd_list), stream::get_expected_sync_method(config))
     , _engine(engine)
     , m_imm_cmd_list(std::move(cmd_list)) {
+    OPENVINO_THROW("[GPU] Currently not covering case for sharing stream");
     const auto &info = engine.get_device_info();
     bool use_counter_based_events = m_queue_type == QueueTypes::in_order && info.supports_counter_based_events;
 
@@ -292,6 +298,7 @@ void ze_stream::add_new_cmd_list() const {
     OV_ZE_EXPECT(ze::zeCommandListCreate(ctx_handle, device_handle, &command_list_desc, &cmd_list_handle));
     command_list cmd_list;
     cmd_list.cmd_list = ze_command_list_resource(cmd_list_handle);
+    OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(cmd_list_handle, nullptr, 0, nullptr));
 
     ze_fence_desc_t fence_desc = {ZE_STRUCTURE_TYPE_FENCE_DESC, nullptr, 0};
     ze_fence_handle_t fence_handle = nullptr;
@@ -331,6 +338,7 @@ void ze_stream::finish_busy_cmd_lists() const {
         auto cmd_list = m_busy_cmd_lists.front();
         OV_ZE_EXPECT(ze::zeFenceHostSynchronize(cmd_list.fence.handle(), UINT64_MAX));
         OV_ZE_EXPECT(ze::zeCommandListReset(cmd_list.cmd_list.handle()));
+        OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(cmd_list.cmd_list.handle(), nullptr, 0, nullptr));
         OV_ZE_EXPECT(ze::zeFenceReset(cmd_list.fence.handle()));
         m_cmd_lists.push(cmd_list);
         m_busy_cmd_lists.pop();
@@ -518,7 +526,7 @@ dnnl::stream& ze_stream::get_onednn_stream() {
     OPENVINO_ASSERT(_engine.get_device_info().vendor_id == INTEL_VENDOR_ID, "[GPU] Can't create onednn stream handle as for non-Intel devices");
     if (is_immediate()) {
         if (!_imm_onednn_stream) {
-            _imm_onednn_stream = std::make_shared<dnnl::stream>(dnnl::ze_interop::make_stream(_engine.get_onednn_engine(), m_imm_cmd_list->handle(), m_ev_factory->is_profiling_enabled()));
+            _imm_onednn_stream = std::make_shared<dnnl::stream>(dnnl::ze_interop::make_stream(_engine.get_onednn_engine(), m_imm_cmd_list.handle(), m_ev_factory->is_profiling_enabled()));
         }
         return *_imm_onednn_stream;
     }
