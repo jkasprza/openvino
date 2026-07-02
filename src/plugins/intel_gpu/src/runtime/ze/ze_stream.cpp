@@ -86,6 +86,77 @@ ze_result_t set_kernel_arg(ze_kernel_handle_t& kernel, uint32_t idx, cldnn::memo
     }
 }
 
+template<typename T>
+ze_result_t update_kernel_arg_scalar(ze_command_list_handle_t cmd_list, uint32_t idx, const T& val, uint64_t cmd_id) {
+    GPU_DEBUG_TRACE_DETAIL << "cmd_list: " << cmd_list << " cmd_id: " << cmd_id << " set scalar " << idx << " (" << ov::element::from<T>().get_type_name() << ")" << val << "\n";
+    ze_mutable_kernel_argument_exp_desc_t arg_update_desc = {
+                    ZE_STRUCTURE_TYPE_MUTABLE_KERNEL_ARGUMENT_EXP_DESC,
+                    nullptr,
+                    cmd_id,
+                    idx,
+                    sizeof(T),
+                    &val};
+    ze_mutable_commands_exp_desc_t update_desc = {
+                    ZE_STRUCTURE_TYPE_MUTABLE_COMMANDS_EXP_DESC, &arg_update_desc, 0};
+    return ze::zeCommandListUpdateMutableCommandsExp(cmd_list, &update_desc);
+}
+
+ze_result_t update_kernel_arg_local_memory(ze_command_list_handle_t cmd_list, uint32_t idx, size_t size, uint64_t cmd_id) {
+    if (size == 0)
+        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+
+    GPU_DEBUG_TRACE_DETAIL << "cmd_list: " << cmd_list << " cmd_id: " << cmd_id << " set arg " << idx << " local memory size: " << size << std::endl;
+    ze_mutable_kernel_argument_exp_desc_t arg_update_desc = {
+                    ZE_STRUCTURE_TYPE_MUTABLE_KERNEL_ARGUMENT_EXP_DESC,
+                    nullptr,
+                    cmd_id,
+                    idx,
+                    size,
+                    nullptr};
+    ze_mutable_commands_exp_desc_t update_desc = {
+                    ZE_STRUCTURE_TYPE_MUTABLE_COMMANDS_EXP_DESC, &arg_update_desc, 0};
+    return ze::zeCommandListUpdateMutableCommandsExp(cmd_list, &update_desc);
+}
+
+ze_result_t update_kernel_arg(ze_command_list_handle_t cmd_list, uint32_t idx, cldnn::memory::cptr mem, uint64_t cmd_id) {
+    if (!mem)
+        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+
+    if (mem->get_layout().format.is_image_2d()) {
+        auto &image = downcast<const ze::gpu_image2d>(*mem);
+        auto handle = image.get_handle();
+        GPU_DEBUG_TRACE_DETAIL << "cmd_list: " << cmd_list << " cmd_id: " << cmd_id << " set arg (image) " << idx << " mem: " << handle << " size: " << mem->size() << std::endl;
+        ze_mutable_kernel_argument_exp_desc_t arg_update_desc = {
+                    ZE_STRUCTURE_TYPE_MUTABLE_KERNEL_ARGUMENT_EXP_DESC,
+                    nullptr,
+                    cmd_id,
+                    idx,
+                    sizeof(handle),
+                    &handle};
+        ze_mutable_commands_exp_desc_t update_desc = {
+                    ZE_STRUCTURE_TYPE_MUTABLE_COMMANDS_EXP_DESC, &arg_update_desc, 0};
+        return ze::zeCommandListUpdateMutableCommandsExp(cmd_list, &update_desc);
+    } else if (memory_capabilities::is_usm_type(mem->get_allocation_type()) || mem->get_allocation_type() == allocation_type::cl_mem) {
+        auto &usm = downcast<const ze::gpu_usm>(*mem);
+        auto ptr = usm.buffer_ptr();
+        auto mem_type = usm.get_allocation_type();
+        GPU_DEBUG_TRACE_DETAIL << "cmd_list: " << cmd_list << " cmd_id: " << cmd_id << " set arg (" << mem_type << ") " << idx
+                            << " mem: " << ptr << " size: " << mem->size() << std::endl;
+        ze_mutable_kernel_argument_exp_desc_t arg_update_desc = {
+                    ZE_STRUCTURE_TYPE_MUTABLE_KERNEL_ARGUMENT_EXP_DESC,
+                    nullptr,
+                    cmd_id,
+                    idx,
+                    sizeof(ptr),
+                    &ptr};
+        ze_mutable_commands_exp_desc_t update_desc = {
+                    ZE_STRUCTURE_TYPE_MUTABLE_COMMANDS_EXP_DESC, &arg_update_desc, 0};
+        return ze::zeCommandListUpdateMutableCommandsExp(cmd_list, &update_desc);
+    } else {
+        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+}
+
 void set_arguments_impl(ze_kernel_handle_t kernel,
                          const arguments_desc& args,
                          const kernel_arguments_data& data) {
@@ -195,6 +266,116 @@ void set_arguments_impl(ze_kernel_handle_t kernel,
     }
 }
 
+void update_arguments_impl(ze_command_list_handle_t cmd_list,
+                         const arguments_desc& args,
+                         const kernel_arguments_data& data,
+                         uint64_t cmd_id) {
+    using args_t = argument_desc::Types;
+    using scalar_t = scalar_desc::Types;
+    
+    for (uint32_t i = 0; i < static_cast<uint32_t>(args.size()); i++) {
+        ze_result_t status = ZE_RESULT_NOT_READY;
+        switch (args[i].t) {
+            case args_t::INPUT:
+                if (args[i].index < data.inputs.size() && data.inputs[args[i].index]) {
+                    status = update_kernel_arg(cmd_list, i, data.inputs[args[i].index], cmd_id);
+                }
+                break;
+            case args_t::INPUT_OF_FUSED_PRIMITIVE:
+                if (args[i].index < data.fused_op_inputs.size() && data.fused_op_inputs[args[i].index]) {
+                    status = update_kernel_arg(cmd_list, i, data.fused_op_inputs[args[i].index], cmd_id);
+                }
+                break;
+            case args_t::INTERNAL_BUFFER:
+                if (args[i].index < data.intermediates.size() && data.intermediates[args[i].index]) {
+                    status = update_kernel_arg(cmd_list, i, data.intermediates[args[i].index], cmd_id);
+                }
+                break;
+            case args_t::OUTPUT:
+                if (args[i].index < data.outputs.size() && data.outputs[args[i].index]) {
+                    status = update_kernel_arg(cmd_list, i, data.outputs[args[i].index], cmd_id);
+                }
+                break;
+            case args_t::WEIGHTS:
+                status = update_kernel_arg(cmd_list, i, data.weights, cmd_id);
+                break;
+            case args_t::BIAS:
+                status = update_kernel_arg(cmd_list, i, data.bias, cmd_id);
+                break;
+            case args_t::WEIGHTS_ZERO_POINTS:
+                status = update_kernel_arg(cmd_list, i, data.weights_zero_points, cmd_id);
+                break;
+            case args_t::ACTIVATIONS_ZERO_POINTS:
+                status = update_kernel_arg(cmd_list, i, data.activations_zero_points, cmd_id);
+                break;
+            case args_t::COMPENSATION:
+                status = update_kernel_arg(cmd_list, i, data.compensation, cmd_id);
+                break;
+            case args_t::SCALE_TABLE:
+                status = update_kernel_arg(cmd_list, i, data.scale_table, cmd_id);
+                break;
+            case args_t::SLOPE:
+                status = update_kernel_arg(cmd_list, i, data.slope, cmd_id);
+                break;
+            case args_t::SCALAR:
+                if (data.scalars && args[i].index < data.scalars->size()) {
+                    const auto& scalar = (*data.scalars)[args[i].index];
+                    switch (scalar.t) {
+                        case scalar_t::UINT8:
+                            status = update_kernel_arg_scalar<uint8_t>(cmd_list, i, scalar.v.u8, cmd_id);
+                            break;
+                        case scalar_t::UINT16:
+                            status = update_kernel_arg_scalar<uint16_t>(cmd_list, i, scalar.v.u16, cmd_id);
+                            break;
+                        case scalar_t::UINT32:
+                            status = update_kernel_arg_scalar<uint32_t>(cmd_list, i, scalar.v.u32, cmd_id);
+                            break;
+                        case scalar_t::UINT64:
+                            status = update_kernel_arg_scalar<uint64_t>(cmd_list, i, scalar.v.u64, cmd_id);
+                            break;
+                        case scalar_t::INT8:
+                            status = update_kernel_arg_scalar<int8_t>(cmd_list, i, scalar.v.s8, cmd_id);
+                            break;
+                        case scalar_t::INT16:
+                            status = update_kernel_arg_scalar<int16_t>(cmd_list, i, scalar.v.s16, cmd_id);
+                            break;
+                        case scalar_t::INT32:
+                            status = update_kernel_arg_scalar<int32_t>(cmd_list, i, scalar.v.s32, cmd_id);
+                            break;
+                        case scalar_t::INT64:
+                            status = update_kernel_arg_scalar<int64_t>(cmd_list, i, scalar.v.s64, cmd_id);
+                            break;
+                        case scalar_t::FLOAT32:
+                            status = update_kernel_arg_scalar<float>(cmd_list, i, scalar.v.f32, cmd_id);
+                            break;
+                        case scalar_t::FLOAT64:
+                            status = update_kernel_arg_scalar<double>(cmd_list, i, scalar.v.f64, cmd_id);
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                break;
+            case args_t::CELL:
+                status = update_kernel_arg(cmd_list, i, data.cell, cmd_id);
+                break;
+            case args_t::SHAPE_INFO:
+                status = update_kernel_arg(cmd_list, i, data.shape_info, cmd_id);
+                break;
+            case args_t::LOCAL_MEMORY_SIZE:
+                OPENVINO_ASSERT(args[i].index < data.local_memory_args->size() && data.local_memory_args->at(args[i].index),
+                                "The allocated local memory is necessary to set kernel arguments.");
+                status = update_kernel_arg_local_memory(cmd_list, i,  data.local_memory_args->at(args[i].index), cmd_id);
+                break;
+            default:
+                break;
+        }
+        if (status != ZE_RESULT_SUCCESS) {
+            throw std::runtime_error("Error set arg " + std::to_string(i) + ", error code: " + std::to_string(status) + "\n");
+        }
+    }
+}
+
 QueueTypes detect_queue_type(ze_command_list_resource cmd_list) {
     OPENVINO_ASSERT(cmd_list.has_ocl_handle<ocl_resource_type::command_queue>(), "[GPU] Queue type detection requires OpenCL handle");
     auto queue = cmd_list.ocl_handle<ocl_resource_type::command_queue>();
@@ -294,9 +475,12 @@ void ze_stream::add_new_cmd_list() const {
 
     ze_command_list_handle_t cmd_list_handle = nullptr;
     ze_command_list_flags_t flags = m_queue_type == QueueTypes::out_of_order ? 0 : ZE_COMMAND_LIST_FLAG_IN_ORDER;
-    ze_command_list_desc_t command_list_desc = {ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC, nullptr, info.compute_queue_group_ordinal, flags};
+    ze_mutable_command_list_exp_desc_t mut_cmd_list_desc = {
+        ZE_STRUCTURE_TYPE_MUTABLE_COMMAND_LIST_EXP_DESC, nullptr, 0};
+    ze_command_list_desc_t command_list_desc = {ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC, &mut_cmd_list_desc, info.compute_queue_group_ordinal, flags};
     OV_ZE_EXPECT(ze::zeCommandListCreate(ctx_handle, device_handle, &command_list_desc, &cmd_list_handle));
     command_list cmd_list;
+    cmd_list.cmd_ids = std::make_shared<std::unordered_map<std::string, uint64_t>>();
     cmd_list.cmd_list = ze_command_list_resource(cmd_list_handle);
     OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(cmd_list_handle, nullptr, 0, nullptr));
 
@@ -337,6 +521,7 @@ void ze_stream::finish_busy_cmd_lists() const {
     while (!m_busy_cmd_lists.empty()) {
         auto cmd_list = m_busy_cmd_lists.front();
         OV_ZE_EXPECT(ze::zeFenceHostSynchronize(cmd_list.fence.handle(), UINT64_MAX));
+        cmd_list.cmd_ids->clear();
         OV_ZE_EXPECT(ze::zeCommandListReset(cmd_list.cmd_list.handle()));
         OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(cmd_list.cmd_list.handle(), nullptr, 0, nullptr));
         OV_ZE_EXPECT(ze::zeFenceReset(cmd_list.fence.handle()));
@@ -351,6 +536,18 @@ void ze_stream::set_arguments(kernel& kernel, const kernel_arguments_desc& args_
 
     auto& ze_kernel = downcast<ze::ze_kernel>(kernel);
     auto kern = ze_kernel.get_kernel_handle();
+    if (!is_immediate() && can_resubmit()) {
+        auto e = m_reuse_cmd_list.value();
+        auto kernel_ptr = reinterpret_cast<uintptr_t>(&kernel);
+        auto key = args_desc.layerID + "_" + std::to_string(kernel_ptr);
+        auto it = e.cmd_ids->find(key);
+        if (it == e.cmd_ids->end()) {
+            OPENVINO_THROW("[GPU] Could not find key when updating kernel arguments: ", key);
+        }
+        GPU_DEBUG_TRACE_DETAIL << "Updating kernel arguments for kernel: " << key << std::endl;
+        update_arguments_impl(e.cmd_list.handle(), args_desc.arguments, args, it->second);
+    }
+    // Always set arguments on kernel object
     set_arguments_impl(kern, args_desc.arguments, args);
 }
 
@@ -383,12 +580,26 @@ event::ptr ze_stream::enqueue_kernel(kernel& kernel,
     auto local = to_group_count(args_desc.workGroups.local);
     ze_group_count_t args = { global.groupCountX / local.groupCountX, global.groupCountY / local.groupCountY, global.groupCountZ / local.groupCountZ };
     OV_ZE_EXPECT(ze::zeKernelSetGroupSize(kern, local.groupCountX, local.groupCountY, local.groupCountZ));
-    OV_ZE_EXPECT(ze::zeCommandListAppendLaunchKernel(get_queue(),
+    auto handle = get_queue();
+    ze_mutable_command_id_exp_desc_t cmd_id_desc = {
+            ZE_STRUCTURE_TYPE_MUTABLE_COMMAND_ID_EXP_DESC, nullptr, ZE_MUTABLE_COMMAND_EXP_FLAG_KERNEL_ARGUMENTS};
+    uint64_t cmd_id = 0;
+    OV_ZE_EXPECT(ze::zeCommandListGetNextCommandIdExp(handle, &cmd_id_desc, &cmd_id));
+    OV_ZE_EXPECT(ze::zeCommandListAppendLaunchKernel(handle,
                                              kern,
                                              &args,
                                              set_output_event ? std::dynamic_pointer_cast<ze_base_event>(ev)->get_handle() : nullptr,
                                              dep_events_ptr == nullptr ? 0 : static_cast<uint32_t>(dep_events_ptr->size()),
                                              dep_events_ptr == nullptr ? 0 : &dep_events_ptr->front()));
+    if (!is_immediate()) {
+        auto e = m_cmd_lists.front();
+        auto kernel_ptr = reinterpret_cast<uintptr_t>(&kernel);
+        auto key = args_desc.layerID + "_" + std::to_string(kernel_ptr);
+        if (e.cmd_ids->find(key) != e.cmd_ids->end()) {
+            OPENVINO_THROW("[GPU] Key conflict: ", key);
+        } 
+        e.cmd_ids->insert({key, cmd_id});
+    }
 
     return ev;
 }

@@ -15,6 +15,8 @@
 #include <iomanip>
 #include <exception>
 
+#include "my_profiling.hpp"
+
 // Expect success of level zero command, throw runtime error otherwise.
 // if already handling an exception (stack unwinding), logging a warning instead to avoid termination.
 #define OV_ZE_EXPECT(f)                                                         \
@@ -60,6 +62,7 @@ inline const ::ov::ZeroApi& get_ze_api_instance() {
         if (ze_api.symbol == nullptr) {                                                                     \
             return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;                                                     \
         }                                                                                                   \
+        examples::utils::scope_profiler profiler(#symbol, "ze_api_call");                                   \
         return ze_api.symbol(std::forward<Args>(args)...);                                                  \
     }
 symbols_list();

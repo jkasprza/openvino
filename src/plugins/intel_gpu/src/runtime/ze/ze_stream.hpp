@@ -13,6 +13,7 @@
 #include "ze_base_event_factory.hpp"
 
 #include <queue>
+#include <unordered_map>
 
 namespace cldnn {
 namespace ze {
@@ -134,6 +135,7 @@ private:
     void finish_busy_cmd_lists() const;
     struct command_list {
         ze_command_list_resource cmd_list;
+        std::shared_ptr<std::unordered_map<std::string, uint64_t>> cmd_ids;
         ze_fence_resource fence;
 #ifdef ENABLE_ONEDNN_FOR_GPU
         std::shared_ptr<dnnl::stream> onednn_stream;
