@@ -105,6 +105,9 @@ public:
         return log;
     }
 
+    uint64_t m_queue_stamp = 0;
+    uint64_t m_cmd_id;
+    ze_group_count_t group_count, group_size;
 private:
     // To ensure correct lifetime, drop kernel first then build log and module
     ze_module_resource m_module;

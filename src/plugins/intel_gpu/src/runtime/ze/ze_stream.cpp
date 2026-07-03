@@ -387,6 +387,12 @@ QueueTypes detect_queue_type(ze_command_list_resource cmd_list) {
     return (properties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) ? QueueTypes::out_of_order : QueueTypes::in_order;
 }
 
+bool compare_dispatch(const ze_group_count_t& lhs, const ze_group_count_t& rhs) {
+    return lhs.groupCountX == rhs.groupCountX &&
+            lhs.groupCountY == rhs.groupCountY &&
+            lhs.groupCountZ == rhs.groupCountZ;
+}
+
 }  // namespace
 
 ze_stream::ze_stream(const ze_engine &engine, const ExecutionConfig& config)
@@ -480,7 +486,6 @@ void ze_stream::add_new_cmd_list() const {
     ze_command_list_desc_t command_list_desc = {ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC, &mut_cmd_list_desc, info.compute_queue_group_ordinal, flags};
     OV_ZE_EXPECT(ze::zeCommandListCreate(ctx_handle, device_handle, &command_list_desc, &cmd_list_handle));
     command_list cmd_list;
-    cmd_list.cmd_ids = std::make_shared<std::unordered_map<std::string, uint64_t>>();
     cmd_list.cmd_list = ze_command_list_resource(cmd_list_handle);
     OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(cmd_list_handle, nullptr, 0, nullptr));
 
@@ -491,12 +496,14 @@ void ze_stream::add_new_cmd_list() const {
 #ifdef ENABLE_ONEDNN_FOR_GPU
     cmd_list.onednn_stream = nullptr;
 #endif
+    cmd_list.can_reuse = true;
+    cmd_list.queue_stamp_start = 0;
 
     m_cmd_lists.push(cmd_list);
 }
 
 void ze_stream::submit_cmd_list() const {
-    if (m_cmd_lists.empty()) {
+    if (m_cmd_lists.empty() || !m_cmd_list_dirty) {
         return;
     }
 
@@ -506,11 +513,12 @@ void ze_stream::submit_cmd_list() const {
     OV_ZE_EXPECT(ze::zeCommandQueueExecuteCommandLists(m_cmd_queue.handle(), 1, &cmd_list_handle, cmd_list.fence.handle()));
     m_busy_cmd_lists.push(cmd_list);
     m_cmd_lists.pop();
+    m_cmd_list_dirty = false;
 }
 
 void ze_stream::finish_busy_cmd_lists() const {
     m_reuse_cmd_list = std::nullopt;
-    if (m_busy_cmd_lists.size() == 1) {
+    if (m_busy_cmd_lists.size() == 1 && m_busy_cmd_lists.front().can_reuse) {
         auto cmd_list = m_busy_cmd_lists.front();
         OV_ZE_EXPECT(ze::zeFenceHostSynchronize(cmd_list.fence.handle(), UINT64_MAX));
         OV_ZE_EXPECT(ze::zeFenceReset(cmd_list.fence.handle()));
@@ -521,10 +529,11 @@ void ze_stream::finish_busy_cmd_lists() const {
     while (!m_busy_cmd_lists.empty()) {
         auto cmd_list = m_busy_cmd_lists.front();
         OV_ZE_EXPECT(ze::zeFenceHostSynchronize(cmd_list.fence.handle(), UINT64_MAX));
-        cmd_list.cmd_ids->clear();
         OV_ZE_EXPECT(ze::zeCommandListReset(cmd_list.cmd_list.handle()));
         OV_ZE_EXPECT(ze::zeCommandListAppendBarrier(cmd_list.cmd_list.handle(), nullptr, 0, nullptr));
         OV_ZE_EXPECT(ze::zeFenceReset(cmd_list.fence.handle()));
+        cmd_list.can_reuse = true;
+        cmd_list.queue_stamp_start = 0;
         m_cmd_lists.push(cmd_list);
         m_busy_cmd_lists.pop();
     }
@@ -536,16 +545,15 @@ void ze_stream::set_arguments(kernel& kernel, const kernel_arguments_desc& args_
 
     auto& ze_kernel = downcast<ze::ze_kernel>(kernel);
     auto kern = ze_kernel.get_kernel_handle();
-    if (!is_immediate() && can_resubmit()) {
+    if (!is_immediate() && can_resubmit() && m_update_mode) {
         auto e = m_reuse_cmd_list.value();
-        auto kernel_ptr = reinterpret_cast<uintptr_t>(&kernel);
-        auto key = args_desc.layerID + "_" + std::to_string(kernel_ptr);
-        auto it = e.cmd_ids->find(key);
-        if (it == e.cmd_ids->end()) {
-            OPENVINO_THROW("[GPU] Could not find key when updating kernel arguments: ", key);
+        if (e.queue_stamp_start > ze_kernel.m_queue_stamp) {
+            GPU_DEBUG_TRACE_DETAIL << "Could not update kernel arguments for: " << args_desc.layerID << std::endl;
+            m_reuse_cmd_list = std::nullopt;
+        } else {
+            GPU_DEBUG_TRACE_DETAIL << "Updating kernel arguments for kernel: " << args_desc.layerID << std::endl;
+            update_arguments_impl(e.cmd_list.handle(), args_desc.arguments, args, ze_kernel.m_cmd_id);
         }
-        GPU_DEBUG_TRACE_DETAIL << "Updating kernel arguments for kernel: " << key << std::endl;
-        update_arguments_impl(e.cmd_list.handle(), args_desc.arguments, args, it->second);
     }
     // Always set arguments on kernel object
     set_arguments_impl(kern, args_desc.arguments, args);
@@ -579,12 +587,46 @@ event::ptr ze_stream::enqueue_kernel(kernel& kernel,
     auto global = to_group_count(args_desc.workGroups.global);
     auto local = to_group_count(args_desc.workGroups.local);
     ze_group_count_t args = { global.groupCountX / local.groupCountX, global.groupCountY / local.groupCountY, global.groupCountZ / local.groupCountZ };
-    OV_ZE_EXPECT(ze::zeKernelSetGroupSize(kern, local.groupCountX, local.groupCountY, local.groupCountZ));
+    bool needs_dispatch_update = !compare_dispatch(local, ze_kernel.group_size) || !compare_dispatch(args, ze_kernel.group_count);
+    if (needs_dispatch_update) {
+        OV_ZE_EXPECT(ze::zeKernelSetGroupSize(kern, local.groupCountX, local.groupCountY, local.groupCountZ));
+        ze_kernel.group_size = local;
+        ze_kernel.group_count = args;
+    }
+    if (m_update_mode) {
+        if (can_resubmit()) {
+            auto cmd_list = m_reuse_cmd_list.value();
+            if (cmd_list.queue_stamp_start > ze_kernel.m_queue_stamp) {
+                GPU_DEBUG_TRACE_DETAIL << "Could not update kernel dispatch for: " << args_desc.layerID << std::endl;
+                m_reuse_cmd_list = std::nullopt;
+                return nullptr;
+            }
+            if (!needs_dispatch_update) {
+                return nullptr;
+            }
+            ze_mutable_group_size_exp_desc_t group_size_desc = {
+                ZE_STRUCTURE_TYPE_MUTABLE_GROUP_SIZE_EXP_DESC, nullptr, ze_kernel.m_cmd_id,
+                local.groupCountX, local.groupCountY, local.groupCountZ };
+            ze_mutable_group_count_exp_desc_t group_count_desc = {
+                ZE_STRUCTURE_TYPE_MUTABLE_GROUP_COUNT_EXP_DESC, &group_size_desc, ze_kernel.m_cmd_id, &args};
+            ze_mutable_commands_exp_desc_t update_desc = {
+                ZE_STRUCTURE_TYPE_MUTABLE_COMMANDS_EXP_DESC, &group_count_desc, 0 };
+            OV_ZE_EXPECT(ze::zeCommandListUpdateMutableCommandsExp(cmd_list.cmd_list.handle(), &update_desc));
+        }
+        return nullptr;
+    }
     auto handle = get_queue();
-    ze_mutable_command_id_exp_desc_t cmd_id_desc = {
-            ZE_STRUCTURE_TYPE_MUTABLE_COMMAND_ID_EXP_DESC, nullptr, ZE_MUTABLE_COMMAND_EXP_FLAG_KERNEL_ARGUMENTS};
     uint64_t cmd_id = 0;
-    OV_ZE_EXPECT(ze::zeCommandListGetNextCommandIdExp(handle, &cmd_id_desc, &cmd_id));
+    if (!is_immediate()) {
+        ze_mutable_command_id_exp_desc_t cmd_id_desc = {
+            ZE_STRUCTURE_TYPE_MUTABLE_COMMAND_ID_EXP_DESC,
+            nullptr,
+            ZE_MUTABLE_COMMAND_EXP_FLAG_KERNEL_ARGUMENTS
+            | ZE_MUTABLE_COMMAND_EXP_FLAG_GROUP_COUNT
+            | ZE_MUTABLE_COMMAND_EXP_FLAG_GROUP_SIZE
+        };
+        OV_ZE_EXPECT(ze::zeCommandListGetNextCommandIdExp(handle, &cmd_id_desc, &cmd_id));
+    }
     OV_ZE_EXPECT(ze::zeCommandListAppendLaunchKernel(handle,
                                              kern,
                                              &args,
@@ -592,13 +634,18 @@ event::ptr ze_stream::enqueue_kernel(kernel& kernel,
                                              dep_events_ptr == nullptr ? 0 : static_cast<uint32_t>(dep_events_ptr->size()),
                                              dep_events_ptr == nullptr ? 0 : &dep_events_ptr->front()));
     if (!is_immediate()) {
-        auto e = m_cmd_lists.front();
-        auto kernel_ptr = reinterpret_cast<uintptr_t>(&kernel);
-        auto key = args_desc.layerID + "_" + std::to_string(kernel_ptr);
-        if (e.cmd_ids->find(key) != e.cmd_ids->end()) {
-            OPENVINO_THROW("[GPU] Key conflict: ", key);
-        } 
-        e.cmd_ids->insert({key, cmd_id});
+        auto &e = m_cmd_lists.front();
+        auto stamp  = m_queue_counter.load();
+        if (!m_cmd_list_dirty) {
+            m_cmd_list_dirty = true;
+            e.queue_stamp_start = stamp;
+        }
+        if (e.queue_stamp_start <= ze_kernel.m_queue_stamp) {
+            GPU_DEBUG_TRACE_DETAIL << "Current command list will not be reused as " << args_desc.layerID << " kernel was submitted more than once" << std::endl;
+            e.can_reuse = false;
+        }
+        ze_kernel.m_queue_stamp = stamp;
+        ze_kernel.m_cmd_id = cmd_id;
     }
 
     return ev;
@@ -676,6 +723,7 @@ void ze_stream::finish() const {
     if (is_immediate()) {
         OV_ZE_EXPECT(ze::zeCommandListHostSynchronize(get_queue(), endless_wait));
     } else {
+        OV_ZE_EXPECT(ze::zeCommandListHostSynchronize(m_imm_cmd_list.handle(), endless_wait));
         submit_cmd_list();
         finish_busy_cmd_lists();
         GPU_DEBUG_INFO << "[GPU] Finished Level Zero stream (cmd_lists=" << m_cmd_lists.size() << ", busy_cmd_lists=" << m_busy_cmd_lists.size() << ")" << std::endl; 

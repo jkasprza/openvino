@@ -27,7 +27,6 @@ class ze_stream : public stream {
 public:
     ze_command_list_handle_t get_queue() const {
         if (is_immediate()) {
-            OPENVINO_THROW("[GPU] Immediate execution disabled for this experiment");
             return m_imm_cmd_list.handle();
         }
         if (m_cmd_lists.empty()) {
@@ -101,6 +100,12 @@ public:
         m_busy_cmd_lists.push(cmd_list);
         m_reuse_cmd_list = std::nullopt;
     }
+    void set_update_mode(bool update) override {
+        m_update_mode = update;
+    }
+    bool get_update_mode() override {
+        return m_update_mode;
+    }
 
     void flush() const override;
     void flush_cmd_list() const {
@@ -134,8 +139,9 @@ private:
     void submit_cmd_list() const;
     void finish_busy_cmd_lists() const;
     struct command_list {
+        uint64_t queue_stamp_start;
+        bool can_reuse;
         ze_command_list_resource cmd_list;
-        std::shared_ptr<std::unordered_map<std::string, uint64_t>> cmd_ids;
         ze_fence_resource fence;
 #ifdef ENABLE_ONEDNN_FOR_GPU
         std::shared_ptr<dnnl::stream> onednn_stream;
@@ -159,6 +165,8 @@ private:
     std::shared_ptr<ze_base_event_factory> m_ev_factory;
     std::shared_ptr<ze_base_event_factory> m_user_ev_factory;
     ze_stream_execution_mode mode = ze_stream_execution_mode::deferred;
+    mutable bool m_cmd_list_dirty = false;
+    mutable bool m_update_mode = false;
 
 #ifdef ENABLE_ONEDNN_FOR_GPU
     std::shared_ptr<dnnl::stream> _imm_onednn_stream = nullptr;

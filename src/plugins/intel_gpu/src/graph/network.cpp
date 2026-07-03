@@ -938,12 +938,13 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     bool resubmitted = false;
     if (_stream->can_resubmit()) {
         bool primitives_updated = false;
+        _stream->set_update_mode(true);
         for (auto& inst : _exec_order) {
             inst->reset_events();
             inst->prepare_primitive();
             primitives_updated = primitives_updated || inst->is_changed();
         }
-        if (!primitives_updated) {
+        if (!primitives_updated && _stream->can_resubmit()) {
             GPU_DEBUG_INFO << "[GPU] Resubmitting stream for network execution" << std::endl;
             _stream->resubmit(events);
             resubmitted = true;
@@ -956,6 +957,7 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     } else {
         GPU_DEBUG_INFO << "[GPU] Could not resubmit stream as previous iteration was fragmented" << std::endl;
     }
+    _stream->set_update_mode(false);
     if (!resubmitted) {
         for (auto& inst : _exec_order) {
             NODE_DEBUG(*inst);

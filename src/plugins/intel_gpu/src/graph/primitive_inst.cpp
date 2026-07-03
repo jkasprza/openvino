@@ -2274,6 +2274,12 @@ void primitive_inst::prepare_primitive() {
         auto grouped_ev = get_network().get_stream().group_events(_impl_params->dep_events);
         _impl_params->dep_events = {grouped_ev};
     }
+
+    if (get_network().get_stream().get_update_mode()) {
+        auto tmp_ev = _impl_params->out_event;
+        execute();
+        _impl_params->out_event = tmp_ev;
+    }
 }
 
 void primitive_inst::execute() {

@@ -61,6 +61,12 @@ public:
     virtual void resubmit(std::vector<event::ptr> const& deps) {
         OPENVINO_NOT_IMPLEMENTED;
     }
+    virtual void set_update_mode(bool update) {
+        OPENVINO_NOT_IMPLEMENTED;
+    }
+    virtual bool get_update_mode() {
+        OPENVINO_NOT_IMPLEMENTED;
+    }
 
     virtual void set_arguments(kernel& kernel, const kernel_arguments_desc& args_desc, const kernel_arguments_data& args) = 0;
     virtual event::ptr enqueue_kernel(kernel& kernel,
