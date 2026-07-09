@@ -173,7 +173,7 @@ struct ze_resource_info<ze_resource_type::usm_memory> {
     using handle_t = ov_ze_usm_handle;
     struct deleter_t {
         void operator()(handle_t handle) const {
-            OV_ZE_WARN(zeMemFree(handle.context, handle.ptr));
+            //OV_ZE_WARN(zeMemFree(handle.context, handle.ptr));
         }
     };
 };

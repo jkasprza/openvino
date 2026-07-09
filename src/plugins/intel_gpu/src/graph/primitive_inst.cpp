@@ -65,6 +65,8 @@
 #include <algorithm>
 #include "utils.hpp"
 
+#include "intel_gpu/runtime/my_profiling.hpp"
+
 #ifdef ENABLE_ONEDNN_FOR_GPU
 #include <impls/onednn/utils.hpp>
 #endif
@@ -2079,6 +2081,7 @@ bool primitive_inst::is_changed() const {
 }
 
 void primitive_inst::prepare_primitive() {
+    //examples::utils::scope_profiler my_profiler("prepare_primitive", "ov_func");
     OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, openvino::itt::handle(id() + "::prepare"));
     const auto& primitive_id = id();
     if (!_has_valid_input) {

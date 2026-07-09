@@ -238,6 +238,7 @@ public:
 private:
     using output_chains_map = std::map<primitive_id, std::vector<primitive_inst*>>;
     uint32_t net_id = 0;
+    uint32_t exec_count = 0;
     program::ptr _program;
     engine& _engine;
     stream::ptr _stream;

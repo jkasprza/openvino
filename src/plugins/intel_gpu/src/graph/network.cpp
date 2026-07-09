@@ -927,6 +927,12 @@ bool network::has_event(const primitive_id& id) const {
 }
 
 void network::execute_impl(const std::vector<event::ptr>& events) {
+    if (exec_count >= 2) {
+        OPENVINO_ASSERT(_stream->can_resubmit(), "[GPU] Network execution failed: stream cannot resubmit");
+        _stream->resubmit(events);
+        exec_count++;
+        return;
+    }
     set_arguments();
 
     // This extra flush command is needed for dynamic models in both cases of out_of_order / in_order operating mode
@@ -988,6 +994,7 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     for (auto& inst : _exec_order) {
         inst->reset_flags();
     }
+    exec_count++;
 }
 
 std::vector<primitive_id> network::get_input_ids() const {
