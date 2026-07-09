@@ -503,6 +503,7 @@ void ze_stream::add_new_cmd_list() const {
 }
 
 void ze_stream::submit_cmd_list() const {
+    OPENVINO_ASSERT(!m_update_mode, "[GPU] Should not submit command lists when update mode is enabled");
     if (m_cmd_lists.empty() || !m_cmd_list_dirty) {
         return;
     }

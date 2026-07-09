@@ -77,8 +77,6 @@ public:
             OV_ZE_EXPECT(ze::zeCommandListCreate(ctx_handle, device_handle, &command_list_desc, &cmd_list_handle));
             sync_cmd_list = ze_command_list_resource(cmd_list_handle);
         }
-        // submit commands in flight
-        submit_cmd_list();
         // prepare and submit sync cmd list
         std::vector<ze_event_handle_t> dep_events;
         for (auto& dep : events) {
@@ -101,6 +99,18 @@ public:
         m_reuse_cmd_list = std::nullopt;
     }
     void set_update_mode(bool update) override {
+        OPENVINO_ASSERT(!is_immediate(), "[GPU] Update mode is only supported for deferred command lists");
+        // When update mode is enabled only immediate copy operations and updates to reused command lists are allowed
+        // Any operations appended to the command list will be discarded
+        if (update && !m_update_mode) {
+            GPU_DEBUG_TRACE_DETAIL << "Enabling kernel arguments update mode for stream" << std::endl;
+            flush_cmd_list();
+        } else if (!update && m_update_mode) {
+            GPU_DEBUG_TRACE_DETAIL << "Disabling kernel arguments update mode for stream" << std::endl;
+            // Reset any commands appended to the command list
+            OV_ZE_EXPECT(ze::zeCommandListReset(get_queue()));
+
+        }
         m_update_mode = update;
     }
     bool get_update_mode() override {
