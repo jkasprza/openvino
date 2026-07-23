@@ -247,6 +247,7 @@ private:
     bool _is_dynamic = false;
     bool _enable_profiling = false;
     bool _reset_arguments;
+    bool _network_dirty = true;
     bool _reuse_variable_mem = false;
 
     /* Common memory pointer for shape_info */
@@ -277,6 +278,7 @@ private:
     std::shared_ptr<ShapePredictor> _shape_predictor;
 
     void build_exec_order();
+    void mark_network_dirty();
     void allocate_primitive_instance(program_node const& node);
     void transfer_memory_to_device(std::shared_ptr<primitive_inst> instance, program_node const& node);
     void add_to_exec_order(const primitive_id& id);

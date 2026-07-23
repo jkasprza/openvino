@@ -404,8 +404,22 @@ event::ptr network::set_input_data(const primitive_id& id, memory::ptr data, boo
         CLDNN_ERROR_MESSAGE(id, "primitive " + id + " is not an input");
     }
     auto input = std::static_pointer_cast<input_layout_inst>(primitive_inst);
-    const bool was_unallocated = !input->output_memory_ptr();
+    const auto prev_mem = input->outputs_memory_count() > 0 ? input->output_memory_ptr() : nullptr;
+    const bool was_unallocated = !prev_mem;
     auto ev = input->set_data(data, need_to_check_memory_to_set);
+
+    // Only invalidate the reusable command list when the bound input buffer actually
+    // changed. For static models the same device buffer is typically rebound every
+    // inference (the plugin copies user data into the same buffer, or the user reuses
+    // the same usm_host tensor), so its kernel-argument addresses are unchanged and the
+    // previously recorded command list can be resubmitted as-is. Contents copied into
+    // the same buffer are synchronized via the returned dependency event.
+    const auto new_mem = input->output_memory_ptr();
+    const bool same_buffer = prev_mem && new_mem &&
+                             get_engine().is_the_same_buffer(*prev_mem, *new_mem) &&
+                             prev_mem->get_layout().compatible(new_mem->get_layout());
+    if (!same_buffer)
+        mark_network_dirty();
 
     if (was_unallocated) {
         // The initial set_arguments() skipped nodes whose dep buffer was null —
@@ -563,6 +577,17 @@ std::vector<event::ptr> network::set_output_memory(const primitive_id& id, memor
     GPU_DEBUG_TRACE_DETAIL << "Set output " << id << " " << mem_new->get_layout().to_short_string() << std::endl;
     std::vector<event::ptr> ret_ev;
     std::shared_ptr<primitive_inst> p_inst = find_primitive(id);
+
+    // Only invalidate the reusable command list when the output buffer actually changed.
+    // For static models the plugin reuses the same output device buffer every inference,
+    // so its kernel-argument addresses are unchanged and the previously recorded command
+    // list can be resubmitted as-is.
+    const auto prev_out = p_inst->outputs_memory_count() > 0 ? p_inst->output_memory_ptr() : nullptr;
+    const bool same_output_buffer = prev_out && mem_new &&
+                                    get_engine().is_the_same_buffer(*prev_out, *mem_new) &&
+                                    prev_out->get_layout().compatible(mem_new->get_layout());
+    if (!same_output_buffer)
+        mark_network_dirty();
 
     auto iter = std::find(_outputs.begin(), _outputs.end(), p_inst);
     if (iter == _outputs.end())
@@ -797,6 +822,7 @@ void network::reset_output_remote_memory_ptrs() {
 void network::invalidate_output_memory_chain(const primitive_id& id) {
     auto p_inst = find_primitive(id);
     p_inst->clear_output_memory();
+    mark_network_dirty();
 
     auto o_iter = _output_chains.find(id);
     if (o_iter != _output_chains.end()) {
@@ -861,6 +887,7 @@ ov::intel_gpu::OutputMemoryBlock* network::get_output_memory_block(const primiti
 }
 
 void network::clear_output_memory_blocks() {
+    mark_network_dirty();
     for (auto& [prim_id, block_ptr] : _output_memory_blocks) {
         invalidate_ext_block_compute_nodes(prim_id);
     }
@@ -947,38 +974,23 @@ bool network::has_event(const primitive_id& id) const {
 }
 
 void network::execute_impl(const std::vector<event::ptr>& events) {
-    set_arguments();
-
-    // This extra flush command is needed for dynamic models in both cases of out_of_order / in_order operating mode
-    // since it reduces `bubbles` number in pipeline and GPU's idle time by timely flushing new kernels to device.
-    // The freqency of flushing (16) is selected empirically, see details in tickets 116365, 116287, 139931.
-    const bool needs_flushing = _is_dynamic;
-    const size_t flush_frequency = needs_flushing ? 16 : 0;
-    size_t executed_prims = 0;
     bool resubmitted = false;
-    if (_stream->can_resubmit()) {
-        bool primitives_updated = false;
-        _stream->set_update_mode(true);
-        for (auto& inst : _exec_order) {
-            inst->reset_events();
-            inst->prepare_primitive();
-            primitives_updated = primitives_updated || inst->is_changed();
-        }
-        if (!primitives_updated && _stream->can_resubmit()) {
-            GPU_DEBUG_INFO << "[GPU] Resubmitting stream for network execution" << std::endl;
-            _stream->resubmit(events);
-            resubmitted = true;
-        } else {
-            for (auto& inst : _exec_order) {
-                inst->reset_flags();
-            }
-            GPU_DEBUG_INFO << "[GPU] Could not resubmit stream as some primitives were updated" << std::endl;
-        }
+    if (_stream->can_resubmit() && !_network_dirty) {
+        _stream->resubmit(events);
+        resubmitted = true;
+        GPU_DEBUG_INFO << "[GPU] Stream was resubmitted" << std::endl;
     } else {
-        GPU_DEBUG_INFO << "[GPU] Could not resubmit stream as previous iteration was fragmented" << std::endl;
+        GPU_DEBUG_INFO << "[GPU] Could not resubmit stream (can_resubmit=" << _stream->can_resubmit()
+            << ", network_dirty=" << _network_dirty << ")" << std::endl;
     }
-    _stream->set_update_mode(false);
     if (!resubmitted) {
+        set_arguments();
+        // This extra flush command is needed for dynamic models in both cases of out_of_order / in_order operating mode
+        // since it reduces `bubbles` number in pipeline and GPU's idle time by timely flushing new kernels to device.
+        // The freqency of flushing (16) is selected empirically, see details in tickets 116365, 116287, 139931.
+        const bool needs_flushing = _is_dynamic;
+        const size_t flush_frequency = needs_flushing ? 16 : 0;
+        size_t executed_prims = 0;
         for (auto& inst : _exec_order) {
             NODE_DEBUG(*inst);
             OV_ITT_SCOPED_TASK_BASE(ov::intel_gpu::itt::domains::intel_gpu_op, openvino::itt::handle(inst->id()));
@@ -1008,6 +1020,11 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
     for (auto& inst : _exec_order) {
         inst->reset_flags();
     }
+    _network_dirty = false;
+}
+
+void network::mark_network_dirty() {
+    _network_dirty = true;
 }
 
 std::vector<primitive_id> network::get_input_ids() const {
@@ -1253,6 +1270,7 @@ void network::transfer_memory_to_device(std::shared_ptr<primitive_inst> instance
 void network::set_variable(const std::string& name, const std::shared_ptr<ov::intel_gpu::VariableStateBase>& variable) {
     GPU_DEBUG_TRACE_DETAIL << "Set variable " << name << " " << variable->get_layout().to_short_string() << std::endl;
     _variables_states[name] = variable;
+    mark_network_dirty();
 }
 
 bool network::has_variable(const std::string &variable_id) const {
