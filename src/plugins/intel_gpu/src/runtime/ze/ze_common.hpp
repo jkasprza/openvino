@@ -58,11 +58,11 @@ inline const ::ov::ZeroApi& get_ze_api_instance() {
 #define symbol_statement(symbol)                                                                            \
     template <typename... Args>                                                                             \
     inline typename std::invoke_result<decltype(&::symbol), Args...>::type wrapped_##symbol(Args... args) { \
+        examples::utils::scope_profiler profiler(#symbol, "ze_api_call");                                    \
         const auto& ze_api = get_ze_api_instance();                                                         \
         if (ze_api.symbol == nullptr) {                                                                     \
             return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;                                                     \
         }                                                                                                   \
-        examples::utils::scope_profiler profiler(#symbol, "ze_api_call");                                   \
         return ze_api.symbol(std::forward<Args>(args)...);                                                  \
     }
 symbols_list();

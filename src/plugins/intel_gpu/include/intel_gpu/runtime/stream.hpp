@@ -61,6 +61,9 @@ public:
     virtual void resubmit(std::vector<event::ptr> const& deps) {
         OPENVINO_NOT_IMPLEMENTED;
     }
+    virtual void invalidate_recording() {
+        OPENVINO_NOT_IMPLEMENTED;
+    }
     virtual void set_update_mode(bool update) {
         OPENVINO_NOT_IMPLEMENTED;
     }

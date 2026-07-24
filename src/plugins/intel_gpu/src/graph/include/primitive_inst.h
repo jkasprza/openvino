@@ -558,7 +558,9 @@ struct typed_primitive_impl : public primitive_impl {
         if (instance.get_impl() != this)
             throw std::invalid_argument(
                 "Trying to execute primitive implementation with mismatching primitive instance");
-
+        if (this->is_cpu()) {
+            instance.get_network().get_stream().invalidate_recording();
+        }
         return execute_impl(event, reinterpret_cast<typed_primitive_inst<PType>&>(instance));
     }
 

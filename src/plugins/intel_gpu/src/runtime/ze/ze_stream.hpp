@@ -63,6 +63,13 @@ public:
     virtual bool can_resubmit() override {
         return m_reuse_cmd_list.has_value();
     }
+    virtual void invalidate_recording() override {
+        if (m_cmd_lists.empty()) {
+            add_new_cmd_list();
+        }
+        m_cmd_lists.front().can_reuse = false;
+        flush_cmd_list();
+    }
     virtual void resubmit(const std::vector<event::ptr>& events) override {
         OPENVINO_ASSERT(m_reuse_cmd_list.has_value(), "[GPU] Attempt to resubmit stream without reusable command list");
         static ze_command_list_resource sync_cmd_list;
