@@ -8,8 +8,7 @@
 
 #include <mutex>
 
-namespace cldnn {
-namespace ze {
+namespace cldnn::ze {
 
 // Interface for creating ze counter based events
 // Should only be used with in-order queue
@@ -20,5 +19,4 @@ public:
 protected:
     std::mutex _mutex;
 };
-}  // namespace ze
-}  // namespace cldnn
+}  // namespace cldnn::ze
